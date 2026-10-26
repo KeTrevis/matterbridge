@@ -32,10 +32,7 @@ To convert markdown text to HTML using reasonable defaults:
 package main
 
 import (
-	"os"
-
 	"github.com/gomarkdown/markdown"
-	"github.com/gomarkdown/markdown/ast"
 	"github.com/gomarkdown/markdown/html"
 	"github.com/gomarkdown/markdown/parser"
 
@@ -71,7 +68,7 @@ func main() {
 }
 ```
 
-Try it online: https://onlinetool.io/goplayground/#txO7hJ-ibeU
+Example source: [examples/basic.go](examples/basic.go)
 
 For more documentation read [this guide](https://blog.kowalczyk.info/article/cxn3/advanced-markdown-processing-in-go.html)
 

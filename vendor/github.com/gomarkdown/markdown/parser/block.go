@@ -3,7 +3,6 @@ package parser
 import (
 	"bytes"
 	"html"
-	"regexp"
 	"strconv"
 	"unicode"
 
@@ -13,20 +12,12 @@ import (
 // Parsing block-level elements.
 
 const (
-	charEntity = "&(?:#x[a-f0-9]{1,8}|#[0-9]{1,8}|[a-z][a-z0-9]{1,31});"
-	escapable  = "[!\"#$%&'()*+,./:;<=>?@[\\\\\\]^_`{|}~-]"
-)
-
-const (
 	captionTable  = "Table: "
 	captionFigure = "Figure: "
 	captionQuote  = "Quote: "
 )
 
 var (
-	reBackslashOrAmp      = regexp.MustCompile(`[\&]`)
-	reEntityOrEscapedChar = regexp.MustCompile(`(?i)\\` + escapable + "|" + charEntity)
-
 	// blockTags is a set of tags that are recognized as HTML block tags.
 	// Any of these can be included in markdown text without special escaping.
 	blockTags = map[string]struct{}{
@@ -76,7 +67,13 @@ var (
 		"output":     {},
 		"progress":   {},
 		"section":    {},
+		"svg":        {},
 		"video":      {},
+	}
+
+	markdownHTMLBlockTags = map[string]struct{}{
+		"details": {},
+		"div":     {},
 	}
 )
 
@@ -411,12 +408,13 @@ func (p *Parser) isPrefixHeading(data []byte) bool {
 	return true
 }
 
-func (p *Parser) prefixHeading(data []byte) int {
-	level := skipCharN(data, 0, '#', 6)
-	i := skipChar(data, level, ' ')
-	end := skipUntilChar(data, i, '\n')
-	skip := end
-	id := ""
+// parseHeadingContent extracts the text range and optional {#id} for a heading
+// whose content starts at i and whose line ends just before the newline at end.
+// It returns the heading id ("" if none), the index where the heading text ends
+// (after trimming a trailing {#id} and any closing '#' markers and spaces), and
+// the number of bytes the whole heading line occupies.
+func (p *Parser) parseHeadingContent(data []byte, i, end int) (id string, contentEnd, skip int) {
+	skip = end
 	if p.extensions&HeadingIDs != 0 {
 		j, k := 0, 0
 		// find start/end of heading id
@@ -429,29 +427,40 @@ func (p *Parser) prefixHeading(data []byte) int {
 			id = string(data[j+2 : k])
 			end = j
 			skip = k + 1
-			for end > 0 && data[end-1] == ' ' {
-				end--
-			}
+			end = backChar(data, end, ' ')
 		}
 	}
+	// strip trailing closing '#' markers and surrounding spaces
 	for end > 0 && data[end-1] == '#' {
 		if isBackslashEscaped(data, end-1) {
 			break
 		}
 		end--
 	}
-	for end > 0 && data[end-1] == ' ' {
-		end--
+	end = backChar(data, end, ' ')
+	return id, end, skip
+}
+
+// setHeadingID assigns block's id, auto-generating one from text when id is
+// empty and AutoHeadingIDs is enabled (recording it for later uniquification).
+func (p *Parser) setHeadingID(block *ast.Heading, id string, text []byte) {
+	block.HeadingID = id
+	if id == "" && p.extensions&AutoHeadingIDs != 0 {
+		block.HeadingID = sanitizeHeadingID(string(text))
+		p.allHeadingsWithAutoID = append(p.allHeadingsWithAutoID, block)
 	}
+}
+
+func (p *Parser) prefixHeading(data []byte) int {
+	level := skipCharN(data, 0, '#', 6)
+	i := skipChar(data, level, ' ')
+	end := skipUntilChar(data, i, '\n')
+	id, end, skip := p.parseHeadingContent(data, i, end)
 	if end > i {
 		block := &ast.Heading{
-			HeadingID: id,
-			Level:     level,
+			Level: level,
 		}
-		if id == "" && p.extensions&AutoHeadingIDs != 0 {
-			block.HeadingID = sanitizeHeadingID(string(data[i:end]))
-			p.allHeadingsWithAutoID = append(p.allHeadingsWithAutoID, block)
-		}
+		p.setHeadingID(block, id, data[i:end])
 		block.Content = data[i:end]
 		p.AddBlock(block)
 	}
@@ -486,44 +495,13 @@ func (p *Parser) isPrefixSpecialHeading(data []byte) bool {
 func (p *Parser) prefixSpecialHeading(data []byte) int {
 	i := skipChar(data, 2, ' ') // ".#" skipped
 	end := skipUntilChar(data, i, '\n')
-	skip := end
-	id := ""
-	if p.extensions&HeadingIDs != 0 {
-		j, k := 0, 0
-		// find start/end of heading id
-		for j = i; j < end-1 && (data[j] != '{' || data[j+1] != '#'); j++ {
-		}
-		for k = j + 1; k < end && data[k] != '}'; k++ {
-		}
-		// extract heading id iff found
-		if j < end && k < end {
-			id = string(data[j+2 : k])
-			end = j
-			skip = k + 1
-			for end > 0 && data[end-1] == ' ' {
-				end--
-			}
-		}
-	}
-	for end > 0 && data[end-1] == '#' {
-		if isBackslashEscaped(data, end-1) {
-			break
-		}
-		end--
-	}
-	for end > 0 && data[end-1] == ' ' {
-		end--
-	}
+	id, end, skip := p.parseHeadingContent(data, i, end)
 	if end > i {
 		block := &ast.Heading{
-			HeadingID: id,
 			IsSpecial: true,
 			Level:     1, // always level 1.
 		}
-		if id == "" && p.extensions&AutoHeadingIDs != 0 {
-			block.HeadingID = sanitizeHeadingID(string(data[i:end]))
-			p.allHeadingsWithAutoID = append(p.allHeadingsWithAutoID, block)
-		}
+		p.setHeadingID(block, id, data[i:end])
 		block.Literal = data[i:end]
 		block.Content = data[i:end]
 		p.AddBlock(block)
@@ -607,6 +585,12 @@ func (p *Parser) html(data []byte, doRender bool) int {
 		return 0
 	}
 
+	if _, ok := markdownHTMLBlockTags[curtag]; ok {
+		if size := p.htmlMarkdownBlock(data, curtag, doRender); size > 0 {
+			return size
+		}
+	}
+
 	// look for an unindented matching closing tag
 	// followed by a blank line
 	found := false
@@ -677,6 +661,84 @@ func (p *Parser) html(data []byte, doRender bool) int {
 	}
 
 	return i
+}
+
+func (p *Parser) htmlMarkdownBlock(data []byte, tag string, doRender bool) int {
+	openEnd := bytes.IndexByte(data, '>')
+	if openEnd < 0 {
+		return 0
+	}
+	openEnd++
+
+	closeStart, consumed := p.findHTMLCloseTag(data, tag, openEnd)
+	if consumed == 0 {
+		return 0
+	}
+	if !hasBlankLineAfter(data, openEnd) || !hasBlankLineBefore(data, closeStart) {
+		return 0
+	}
+
+	closeEnd := closeStart + len("</"+tag+">")
+	if doRender {
+		open := bytes.TrimRight(data[:openEnd], "\n")
+		p.AddBlock(&ast.HTMLBlock{Leaf: ast.Leaf{Literal: open}})
+
+		innerStart := openEnd
+		if innerStart < len(data) && data[innerStart] == '\n' {
+			innerStart++
+		}
+		inner := data[innerStart:closeStart]
+		if len(inner) > 0 {
+			p.Block(inner)
+		}
+
+		close := bytes.TrimRight(data[closeStart:closeEnd], "\n")
+		p.AddBlock(&ast.HTMLBlock{Leaf: ast.Leaf{Literal: close}})
+	}
+
+	return consumed
+}
+
+func hasBlankLineAfter(data []byte, pos int) bool {
+	first := IsEmpty(data[pos:])
+	if first == 0 {
+		return false
+	}
+	return IsEmpty(data[pos+first:]) > 0
+}
+
+func hasBlankLineBefore(data []byte, pos int) bool {
+	if pos < 2 || data[pos-1] != '\n' {
+		return false
+	}
+	lineEnd := pos - 1
+	lineStart := lineEnd
+	for lineStart > 0 && data[lineStart-1] != '\n' {
+		lineStart--
+	}
+	for _, b := range data[lineStart:lineEnd] {
+		if b != ' ' && b != '\t' {
+			return false
+		}
+	}
+	return true
+}
+
+func (p *Parser) findHTMLCloseTag(data []byte, tag string, start int) (closeStart int, consumed int) {
+	for i := start; i < len(data); i++ {
+		for i < len(data) && !(data[i-1] == '<' && data[i] == '/') {
+			i++
+		}
+		if i+2+len(tag) >= len(data) {
+			return 0, 0
+		}
+
+		j := p.htmlFindEnd(tag, data[i-1:])
+		if j > 0 {
+			return i - 1, i + j - 1
+		}
+	}
+	return 0, 0
 }
 
 func finalizeHTMLBlock(block *ast.HTMLBlock) {
@@ -925,7 +987,7 @@ func syntaxRange(data []byte, iout *int) (int, int) {
 
 		i++
 	} else {
-		for i < n && !IsSpace(data[i]) {
+		for i < n && data[i] != '\n' {
 			syn++
 			i++
 		}
@@ -950,8 +1012,6 @@ func (p *Parser) fencedCodeBlock(data []byte, doRender bool) int {
 	work.WriteByte('\n')
 
 	for {
-		// safe to assume beg < len(data)
-
 		// check for the end of the code block
 		fenceEnd, _ := isFenceLine(data[beg:], nil, marker)
 		if fenceEnd != 0 {
@@ -968,63 +1028,154 @@ func (p *Parser) fencedCodeBlock(data []byte, doRender bool) int {
 		}
 
 		// verbatim copy to the working buffer
-		if doRender {
-			work.Write(data[beg:end])
-		}
+		work.Write(data[beg:end])
 		beg = end
 	}
 
-	if doRender {
-		codeBlock := &ast.CodeBlock{
-			IsFenced: true,
-		}
-		codeBlock.Content = work.Bytes() // TODO: get rid of temp buffer
+	if !doRender {
+		return beg
+	}
+	codeBlock := &ast.CodeBlock{
+		IsFenced: true,
+	}
+	codeBlock.Content = work.Bytes() // TODO: get rid of temp buffer
 
-		if p.extensions&Mmark == 0 {
-			p.AddBlock(codeBlock)
-			finalizeCodeBlock(codeBlock)
-			return beg
-		}
-
-		// Check for caption and if found make it a figure.
-		if captionContent, id, consumed := p.caption(data[beg:], []byte(captionFigure)); consumed > 0 {
-			figure := &ast.CaptionFigure{}
-			caption := &ast.Caption{}
-			figure.HeadingID = id
-			p.Inline(caption, captionContent)
-
-			p.AddBlock(figure)
-			codeBlock.AsLeaf().Attribute = figure.AsContainer().Attribute
-			p.addChild(codeBlock)
-			finalizeCodeBlock(codeBlock)
-			p.addChild(caption)
-			p.Finalize(figure)
-
-			beg += consumed
-
-			return beg
-		}
-
-		// Still here, normal block
+	if p.extensions&Mmark == 0 {
 		p.AddBlock(codeBlock)
 		finalizeCodeBlock(codeBlock)
+		return beg
 	}
+
+	// Check for caption and if found make it a figure.
+	if captionContent, id, consumed := p.caption(data[beg:], []byte(captionFigure)); consumed > 0 {
+		figure := &ast.CaptionFigure{}
+		caption := &ast.Caption{}
+		figure.HeadingID = id
+		p.Inline(caption, captionContent)
+
+		p.AddBlock(figure)
+		codeBlock.AsLeaf().Attribute = figure.AsContainer().Attribute
+		p.addChild(codeBlock)
+		finalizeCodeBlock(codeBlock)
+		p.addChild(caption)
+		p.Finalize(figure)
+
+		beg += consumed
+
+		return beg
+	}
+
+	// Still here, normal block
+	p.AddBlock(codeBlock)
+	finalizeCodeBlock(codeBlock)
 
 	return beg
 }
 
-func unescapeChar(str []byte) []byte {
-	if str[0] == '\\' {
-		return []byte{str[1]}
-	}
-	return []byte(html.UnescapeString(string(str)))
-}
-
 func unescapeString(str []byte) []byte {
-	if reBackslashOrAmp.Match(str) {
-		return reEntityOrEscapedChar.ReplaceAllFunc(str, unescapeChar)
+	var out []byte
+	for i := 0; i < len(str); i++ {
+		switch str[i] {
+		case '\\':
+			if i+1 < len(str) && isEscapable(str[i+1]) {
+				if out == nil {
+					out = make([]byte, 0, len(str))
+					out = append(out, str[:i]...)
+				}
+				out = append(out, str[i+1])
+				i++
+				continue
+			}
+		case '&':
+			entityEnd := findEntityEnd(str, i)
+			if entityEnd > i {
+				replacement := html.UnescapeString(string(str[i:entityEnd]))
+				if replacement != string(str[i:entityEnd]) {
+					if out == nil {
+						out = make([]byte, 0, len(str))
+						out = append(out, str[:i]...)
+					}
+					out = append(out, replacement...)
+					i = entityEnd - 1
+					continue
+				}
+			}
+		}
+		if out != nil {
+			out = append(out, str[i])
+		}
+	}
+	if out != nil {
+		return out
 	}
 	return str
+}
+
+func isEscapable(c byte) bool {
+	switch c {
+	case '!', '"', '#', '$', '%', '&', '\'', '(', ')', '*', '+', ',', '.', '/', ':',
+		';', '<', '=', '>', '?', '@', '[', '\\', ']', '^', '_', '`', '{', '|', '}', '~', '-':
+		return true
+	default:
+		return false
+	}
+}
+
+func findEntityEnd(str []byte, start int) int {
+	i := start + 1
+	if i >= len(str) {
+		return 0
+	}
+	if str[i] == '#' {
+		i++
+		if i >= len(str) {
+			return 0
+		}
+		if str[i] == 'x' || str[i] == 'X' {
+			i++
+			digits := 0
+			for i < len(str) && digits < 8 && isHexDigit(str[i]) {
+				i++
+				digits++
+			}
+			if digits == 0 || i >= len(str) || str[i] != ';' {
+				return 0
+			}
+			return i + 1
+		}
+		digits := 0
+		for i < len(str) && digits < 8 && str[i] >= '0' && str[i] <= '9' {
+			i++
+			digits++
+		}
+		if digits == 0 || i >= len(str) || str[i] != ';' {
+			return 0
+		}
+		return i + 1
+	}
+	if !isAlpha(str[i]) {
+		return 0
+	}
+	i++
+	for i < len(str) && i-start <= 32 && isAlnum(str[i]) {
+		i++
+	}
+	if i >= len(str) || str[i] != ';' {
+		return 0
+	}
+	return i + 1
+}
+
+func isAlpha(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
+func isAlnum(c byte) bool {
+	return isAlpha(c) || c >= '0' && c <= '9'
+}
+
+func isHexDigit(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
 }
 
 func finalizeCodeBlock(code *ast.CodeBlock) {
@@ -1073,30 +1224,34 @@ func (p *Parser) terminateBlockquote(data []byte, beg, end int) bool {
 func (p *Parser) quote(data []byte) int {
 	var raw bytes.Buffer
 	beg, end := 0, 0
+	fenceMarker := ""
 	for beg < len(data) {
 		end = beg
-		// Step over whole lines, collecting them. While doing that, check for
-		// fenced code and if one's found, incorporate it altogether,
-		// irregardless of any contents inside it
 		for end < len(data) && data[end] != '\n' {
-			if p.extensions&FencedCode != 0 {
-				if i := p.fencedCodeBlock(data[end:], false); i > 0 {
-					// -1 to compensate for the extra end++ after the loop:
-					end += i - 1
-					break
-				}
-			}
 			end++
 		}
 		end = skipCharN(data, end, '\n', 1)
+		contentBeg := beg
 		if pre := p.quotePrefix(data[beg:]); pre > 0 {
 			// skip the prefix
-			beg += pre
+			contentBeg += pre
+		} else if fenceMarker != "" {
+			// Lines inside a quoted fenced code block may omit the quote
+			// prefix. Keep them in the quote until the fence closes.
 		} else if p.terminateBlockquote(data, beg, end) {
 			break
 		}
 		// this line is part of the blockquote
-		raw.Write(data[beg:end])
+		raw.Write(data[contentBeg:end])
+		if p.extensions&FencedCode != 0 {
+			if _, marker := isFenceLine(data[contentBeg:end], nil, fenceMarker); marker != "" {
+				if fenceMarker == "" {
+					fenceMarker = marker
+				} else {
+					fenceMarker = ""
+				}
+			}
+		}
 		beg = end
 	}
 
@@ -1326,7 +1481,7 @@ func endsWithBlankLine(block ast.Node) bool {
 }
 
 func finalizeList(list *ast.List) {
-	items := list.Parent.GetChildren()
+	items := list.GetChildren()
 	lastItemIdx := len(items) - 1
 	for i, item := range items {
 		isLastItem := i == lastItemIdx
@@ -1337,7 +1492,7 @@ func finalizeList(list *ast.List) {
 		}
 		// recurse into children of list item, to see if there are spaces
 		// between any of them:
-		subItems := item.GetParent().GetChildren()
+		subItems := item.GetChildren()
 		lastSubItemIdx := len(subItems) - 1
 		for j, subItem := range subItems {
 			isLastSubItem := j == lastSubItemIdx
@@ -1352,6 +1507,7 @@ func finalizeList(list *ast.List) {
 // Parse a single list item.
 // Assumes initial prefix is already removed if this is a sublist.
 func (p *Parser) listItem(data []byte, flags *ast.ListType) int {
+	isDefinitionList := *flags&ast.ListTypeDefinition != 0
 	// keep track of the indentation of the first line
 	itemIndent := 0
 	if data[0] == '\t' {
@@ -1384,7 +1540,7 @@ func (p *Parser) listItem(data []byte, flags *ast.ListType) int {
 	}
 	if i == 0 {
 		// if in definition list, set term flag and continue
-		if *flags&ast.ListTypeDefinition != 0 {
+		if isDefinitionList {
 			*flags |= ast.ListTypeTerm
 		} else {
 			return 0
@@ -1410,6 +1566,9 @@ func (p *Parser) listItem(data []byte, flags *ast.ListType) int {
 	// process the following lines
 	containsBlankLine := false
 	sublist := 0
+	// track fenced code blocks inside list items so that lines within
+	// the fence are gathered verbatim (not misinterpreted as list items)
+	fenceMarker := ""
 
 gatherlines:
 	for line < len(data) {
@@ -1443,9 +1602,49 @@ gatherlines:
 
 		chunk := data[line+indentIndex : i]
 
+		// track fenced code blocks inside list items;
+		// only track fences that are indented (part of the list item content),
+		// a fence at indent 0 ends the list (handled below)
+		if !isDefinitionList && p.extensions&FencedCode != 0 {
+			if fenceMarker != "" {
+				if indent == 0 {
+					// non-indented line while inside a fence means we
+					// left the list item content -- abandon the fence
+					fenceMarker = ""
+				} else {
+					// inside a fence: check for closing fence
+					_, marker := isFenceLine(chunk, nil, fenceMarker)
+					if marker != "" {
+						fenceMarker = ""
+					}
+					// gather the line verbatim, skip structure detection
+					if containsBlankLine {
+						containsBlankLine = false
+						raw.WriteByte('\n')
+					}
+					raw.Write(chunk)
+					line = i
+					continue
+				}
+			} else if indent > 0 {
+				// not inside a fence: check for opening fence (indented only)
+				_, marker := isFenceLine(chunk, nil, "")
+				if marker != "" {
+					fenceMarker = marker
+				}
+			}
+		}
+
 		// If there is a fence line (marking starting of a code block)
 		// without indent do not process it as part of the list.
-		if p.extensions&FencedCode != 0 {
+		//
+		// does not apply for definition lists because it causes infinite
+		// loop if text before defintion term is fenced code block start
+		// marker but not part of actual fenced code block
+		// for defnition lists we're called after parsing fence code blocks
+		// so we kno this cannot be a fenced block
+		// https://github.com/gomarkdown/markdown/issues/326
+		if !isDefinitionList && p.extensions&FencedCode != 0 {
 			fenceLineEnd, _ := isFenceLine(chunk, nil, "")
 			if fenceLineEnd > 0 && indent == 0 {
 				*flags |= ast.ListItemEndOfList
@@ -1501,6 +1700,10 @@ gatherlines:
 				break gatherlines
 			}
 			*flags |= ast.ListItemContainsBlock
+
+		case p.quotePrefix(chunk) > 0 && indent < 4:
+			*flags |= ast.ListItemEndOfList
+			break gatherlines
 
 		// anything following an empty line is only part
 		// of this item if it is indented 4 spaces
@@ -1652,7 +1855,9 @@ func (p *Parser) paragraph(data []byte) int {
 			if p.extensions&DefinitionLists != 0 {
 				if i < len(data)-1 && data[i+1] == ':' {
 					listLen := p.list(data[prev:], ast.ListTypeDefinition, 0, '.')
-					return prev + listLen
+					if listLen > 0 {
+						return prev + listLen
+					}
 				}
 			}
 
@@ -1678,10 +1883,7 @@ func (p *Parser) paragraph(data []byte) int {
 				block := &ast.Heading{
 					Level: level,
 				}
-				if p.extensions&AutoHeadingIDs != 0 {
-					block.HeadingID = sanitizeHeadingID(string(data[prev:eol]))
-					p.allHeadingsWithAutoID = append(p.allHeadingsWithAutoID, block)
-				}
+				p.setHeadingID(block, "", data[prev:eol])
 
 				block.Content = data[prev:eol]
 				p.AddBlock(block)

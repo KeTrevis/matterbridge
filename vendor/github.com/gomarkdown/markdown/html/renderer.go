@@ -252,6 +252,15 @@ func isRelativeLink(link []byte) (yes bool) {
 	return false
 }
 
+func isBareRelativePath(link []byte) bool {
+	return len(link) > 0 &&
+		link[0] != '#' &&
+		link[0] != '/' &&
+		!bytes.HasPrefix(link, []byte("./")) &&
+		!bytes.HasPrefix(link, []byte("../")) &&
+		!bytes.ContainsAny(link, ":")
+}
+
 func AddAbsPrefix(link []byte, prefix string) []byte {
 	if len(link) == 0 || len(prefix) == 0 {
 		return link
@@ -265,6 +274,21 @@ func AddAbsPrefix(link []byte, prefix string) []byte {
 		return []byte(newDest)
 	}
 	return link
+}
+
+func AddAbsPrefixToImage(link []byte, prefix string) []byte {
+	if len(link) == 0 || len(prefix) == 0 {
+		return link
+	}
+	if isBareRelativePath(link) {
+		newDest := prefix
+		if newDest[len(newDest)-1] != '/' {
+			newDest += "/"
+		}
+		newDest += string(link)
+		return []byte(newDest)
+	}
+	return AddAbsPrefix(link, prefix)
 }
 
 func appendLinkAttrs(attrs []string, flags Flags, link []byte) []string {
@@ -518,7 +542,7 @@ func (r *Renderer) imageEnter(w io.Writer, image *ast.Image) {
 		return
 	}
 	src := image.Destination
-	src = AddAbsPrefix(src, r.Opts.AbsolutePrefix)
+	src = AddAbsPrefixToImage(src, r.Opts.AbsolutePrefix)
 	attrs := BlockAttrs(image)
 	if r.Opts.Flags&LazyLoadImages != 0 {
 		attrs = append(attrs, `loading="lazy"`)
@@ -641,14 +665,28 @@ func (r *Renderer) EnsureUniqueHeadingID(id string) string {
 	return id
 }
 
-func (r *Renderer) headingEnter(w io.Writer, nodeData *ast.Heading) {
+func (r *Renderer) MakeUniqueHeadingID(hdr *ast.Heading) string {
+	if hdr.HeadingID == "" {
+		return ""
+	}
+	id := r.EnsureUniqueHeadingID(hdr.HeadingID)
+	if r.Opts.HeadingIDPrefix != "" {
+		id = r.Opts.HeadingIDPrefix + id
+	}
+	if r.Opts.HeadingIDSuffix != "" {
+		id = id + r.Opts.HeadingIDSuffix
+	}
+	hdr.HeadingID = id
+	return id
+}
+
+func (r *Renderer) HeadingEnter(w io.Writer, hdr *ast.Heading) {
 	var attrs []string
 	var class string
-	// TODO(miek): add helper functions for coalescing these classes.
-	if nodeData.IsTitleblock {
+	if hdr.IsTitleblock {
 		class = "title"
 	}
-	if nodeData.IsSpecial {
+	if hdr.IsSpecial {
 		if class != "" {
 			class += " special"
 		} else {
@@ -659,35 +697,30 @@ func (r *Renderer) headingEnter(w io.Writer, nodeData *ast.Heading) {
 		attrs = []string{`class="` + class + `"`}
 	}
 
-	if nodeData.HeadingID != "" {
-		id := r.EnsureUniqueHeadingID(nodeData.HeadingID)
-		if r.Opts.HeadingIDPrefix != "" {
-			id = r.Opts.HeadingIDPrefix + id
-		}
-		if r.Opts.HeadingIDSuffix != "" {
-			id = id + r.Opts.HeadingIDSuffix
-		}
+	if hdr.HeadingID != "" {
+		id := r.MakeUniqueHeadingID(hdr)
 		attrID := `id="` + id + `"`
 		attrs = append(attrs, attrID)
 	}
-	attrs = append(attrs, BlockAttrs(nodeData)...)
+	attrs = append(attrs, BlockAttrs(hdr)...)
+	attrs = coalesceClassAttrs(attrs)
 	r.CR(w)
-	r.OutTag(w, HeadingOpenTagFromLevel(nodeData.Level), attrs)
+	r.OutTag(w, HeadingOpenTagFromLevel(hdr.Level), attrs)
 }
 
-func (r *Renderer) headingExit(w io.Writer, heading *ast.Heading) {
-	r.Outs(w, HeadingCloseTagFromLevel(heading.Level))
-	if !(IsListItem(heading.Parent) && ast.GetNextNode(heading) == nil) {
+func (r *Renderer) HeadingExit(w io.Writer, hdr *ast.Heading) {
+	r.Outs(w, HeadingCloseTagFromLevel(hdr.Level))
+	if !(IsListItem(hdr.Parent) && ast.GetNextNode(hdr) == nil) {
 		r.CR(w)
 	}
 }
 
 // Heading writes ast.Heading node
-func (r *Renderer) Heading(w io.Writer, node *ast.Heading, entering bool) {
+func (r *Renderer) Heading(w io.Writer, hdr *ast.Heading, entering bool) {
 	if entering {
-		r.headingEnter(w, node)
+		r.HeadingEnter(w, hdr)
 	} else {
-		r.headingExit(w, node)
+		r.HeadingExit(w, hdr)
 	}
 }
 
@@ -855,10 +888,9 @@ Parse:
 // CodeBlock writes ast.CodeBlock node
 func (r *Renderer) CodeBlock(w io.Writer, codeBlock *ast.CodeBlock) {
 	var attrs []string
-	// TODO(miek): this can add multiple class= attribute, they should be coalesced into one.
-	// This is probably true for some other elements as well
 	attrs = appendLanguageAttr(attrs, codeBlock.Info)
 	attrs = append(attrs, BlockAttrs(codeBlock)...)
+	attrs = coalesceClassAttrs(attrs)
 	r.CR(w)
 
 	r.Outs(w, "<pre>")
@@ -1327,6 +1359,44 @@ func BlockAttrs(node ast.Node) []string {
 	}
 
 	return s
+}
+
+// coalesceClassAttrs merges multiple class="..." attributes into a single one.
+// For example, class="language-go" and class="my-class" become class="language-go my-class".
+func coalesceClassAttrs(attrs []string) []string {
+	const prefix = `class="`
+	var classes []string
+	firstClassIdx := -1
+	for i, a := range attrs {
+		if strings.HasPrefix(a, prefix) && strings.HasSuffix(a, `"`) {
+			if firstClassIdx == -1 {
+				firstClassIdx = i
+			}
+			// extract the value between class=" and trailing "
+			val := a[len(prefix) : len(a)-1]
+			if val != "" {
+				classes = append(classes, val)
+			}
+		}
+	}
+	if firstClassIdx == -1 {
+		return attrs
+	}
+
+	merged := fmt.Sprintf(`class="%s"`, strings.Join(classes, " "))
+	out := make([]string, 0, len(attrs))
+	seenClass := false
+	for i, a := range attrs {
+		if strings.HasPrefix(a, prefix) && strings.HasSuffix(a, `"`) {
+			if !seenClass && i == firstClassIdx {
+				out = append(out, merged)
+				seenClass = true
+			}
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
 }
 
 // TagWithAttributes creates a HTML tag with a given name and attributes
