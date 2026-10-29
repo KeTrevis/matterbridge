@@ -131,6 +131,15 @@ func (b *Bdiscord) webhookSend(msg *config.Message, channelID, threadID string) 
 }
 
 func (b *Bdiscord) handleEventWebhook(msg *config.Message, channelID, threadID string) (string, error) {
+	if msg.Event == config.EventFileFailureSize {
+		for _, warning := range helper.HandleExtra(msg, b.General) {
+			if msg.Text != "" {
+				msg.Text += "\n"
+			}
+			msg.Text += warning.Text
+		}
+		msg.Event = ""
+	}
 	// skip events
 	if msg.Event != "" && msg.Event != config.EventUserAction && msg.Event != config.EventJoinLeave && msg.Event != config.EventTopicChange {
 		return "", nil
@@ -142,9 +151,9 @@ func (b *Bdiscord) handleEventWebhook(msg *config.Message, channelID, threadID s
 		return "", nil
 	}
 
-	// discord username must be [0..32] max
-	if len(msg.Username) > 32 {
-		msg.Username = msg.Username[0:32]
+	// Webhook names accept up to 80 characters, including multibyte display names.
+	if name := []rune(msg.Username); len(name) > 80 {
+		msg.Username = string(name[:80])
 	}
 
 	if msg.ID != "" {

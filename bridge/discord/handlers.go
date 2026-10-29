@@ -115,7 +115,13 @@ func (b *Bdiscord) messageCreate(s *discordgo.Session, m *discordgo.MessageCreat
 		return
 	}
 
-	rmsg := config.Message{Account: b.Account, Avatar: "https://cdn.discordapp.com/avatars/" + m.Author.ID + "/" + m.Author.Avatar + ".jpg", UserID: m.Author.ID, ID: m.ID}
+	avatar := m.Author.AvatarURL("")
+	if m.Member != nil && m.Member.Avatar != "" {
+		member := *m.Member
+		member.User, member.GuildID = m.Author, m.GuildID
+		avatar = member.AvatarURL("")
+	}
+	rmsg := config.Message{Account: b.Account, Avatar: avatar, UserID: m.Author.ID, ID: m.ID}
 
 	b.Log.Debugf("== Receiving event %#v", m.Message)
 
@@ -133,7 +139,11 @@ func (b *Bdiscord) messageCreate(s *discordgo.Session, m *discordgo.MessageCreat
 
 	fromWebhook := m.WebhookID != ""
 	if !fromWebhook && !b.GetBool("UseUserName") {
-		rmsg.Username = b.getNick(m.Author, m.GuildID)
+		if m.Member != nil && m.Member.Nick != "" {
+			rmsg.Username = m.Member.Nick
+		} else {
+			rmsg.Username = b.getNick(m.Author, m.GuildID)
+		}
 	} else {
 		rmsg.Username = m.Author.Username
 		if !fromWebhook && b.GetBool("UseDiscriminator") {
@@ -158,13 +168,10 @@ func (b *Bdiscord) messageCreate(s *discordgo.Session, m *discordgo.MessageCreat
 	// Replace emotes
 	rmsg.Text = replaceEmotes(rmsg.Text)
 
-	// Add our parent id if it exists, and if it's not referring to a message in another channel
-	if ref := m.MessageReference; ref != nil && ref.ChannelID == m.ChannelID {
-		rmsg.ParentID = ref.MessageID
-	}
 	if !b.routeIncomingThread(&rmsg, m.ChannelID) {
 		return
 	}
+	b.quoteReply(m.Message, &rmsg)
 
 	b.handleAttachments(m.Attachments, &rmsg)
 	if rmsg.Text == "" && len(rmsg.Extra["file"]) == 0 && rmsg.Event == "" {
@@ -174,6 +181,31 @@ func (b *Bdiscord) messageCreate(s *discordgo.Session, m *discordgo.MessageCreat
 	b.Log.Debugf("<= Sending message from %s on %s to gateway", m.Author.Username, b.Account)
 	b.Log.Debugf("<= Message is %#v", rmsg)
 	b.Remote <- rmsg
+}
+
+func (b *Bdiscord) quoteReply(m *discordgo.Message, rmsg *config.Message) {
+	if ref := m.MessageReference; ref != nil && ref.ChannelID == m.ChannelID {
+		quoted := m.ReferencedMessage
+		if quoted == nil {
+			var err error
+			quoted, err = b.c.ChannelMessage(ref.ChannelID, ref.MessageID)
+			if err != nil {
+				b.Log.WithError(err).Warn("Could not retrieve replied-to Discord message")
+				return
+			}
+		}
+		text, err := quoted.ContentWithMoreMentionsReplaced(b.c)
+		if err != nil {
+			text = quoted.ContentWithMentionsReplaced()
+		}
+		text = replaceEmotes(b.replaceChannelMentions(text))
+		for _, attachment := range quoted.Attachments {
+			text += "\n" + attachment.URL
+		}
+		if text = strings.TrimSpace(text); text != "" {
+			rmsg.Text = "> " + strings.ReplaceAll(text, "\n", "\n> ") + "\n\n" + rmsg.Text
+		}
+	}
 }
 
 func (b *Bdiscord) handleAttachments(attachments []*discordgo.MessageAttachment, rmsg *config.Message) {

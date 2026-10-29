@@ -63,6 +63,41 @@ func TestHandleEmbed(t *testing.T) {
 	}
 }
 
+func TestIncomingReplyQuotesInsteadOfThreading(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		channel  string
+		quoted   *discordgo.Message
+		requests []discordRequest
+		want     string
+	}{
+		{name: "text", channel: "main", quoted: &discordgo.Message{Content: "message slack"}, want: "> message slack\n\nmessage discord"},
+		{name: "multiline", channel: "main", quoted: &discordgo.Message{Content: "first\nsecond"}, want: "> first\n> second\n\nmessage discord"},
+		{name: "mentions and emoji", channel: "main", quoted: &discordgo.Message{Content: "<@user> <:wave:123>", Mentions: []*discordgo.User{{ID: "user", Username: "Alice"}}}, want: "> @Alice :wave:\n\nmessage discord"},
+		{name: "attachment", channel: "main", quoted: &discordgo.Message{Attachments: []*discordgo.MessageAttachment{{URL: "https://example.com/photo.png"}}}, want: "> https://example.com/photo.png\n\nmessage discord"},
+		{name: "missing embedded reference", channel: "main", requests: []discordRequest{{"GET", "/channels/main/messages/parent", 200, `{"content":"message slack"}`, nil}}, want: "> message slack\n\nmessage discord"},
+		{name: "deleted parent", channel: "main", requests: []discordRequest{{"GET", "/channels/main/messages/parent", 404, `{"code":10008}`, nil}}, want: "message discord"},
+		{name: "another channel", channel: "other", quoted: &discordgo.Message{Content: "private message"}, want: "message discord"},
+		{name: "empty parent", channel: "main", quoted: &discordgo.Message{}, want: "message discord"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := threadBridge(t, true, tc.requests...)
+			message := &discordgo.Message{
+				ID: "reply", GuildID: "guild", ChannelID: "main", Content: "message discord",
+				Author:            &discordgo.User{ID: "human", Username: "Alice"},
+				MessageReference:  &discordgo.MessageReference{ChannelID: tc.channel, MessageID: "parent"},
+				ReferencedMessage: tc.quoted,
+			}
+			b.messageCreate(b.c, &discordgo.MessageCreate{Message: message})
+			require.Len(t, b.Remote, 1)
+			got := <-b.Remote
+			assert.Equal(t, tc.want, got.Text)
+			assert.Empty(t, got.ParentID)
+			assert.Equal(t, "ID:main", got.Channel)
+		})
+	}
+}
+
 func TestForwardMediaAttachments(t *testing.T) {
 	for _, tc := range []struct {
 		name, filename, contentType, caption, body string
@@ -95,9 +130,10 @@ func TestForwardMediaAttachments(t *testing.T) {
 			b.General.MediaDownloadBlackList = tc.blacklist
 			b.messageCreate(b.c, &discordgo.MessageCreate{Message: &discordgo.Message{
 				ID: "message", GuildID: "guild", ChannelID: "main", Content: tc.caption,
-				Author:           &discordgo.User{ID: "user", Username: "Alice"},
-				MessageReference: &discordgo.MessageReference{MessageID: "parent", ChannelID: "main"},
-				Attachments:      []*discordgo.MessageAttachment{{ID: "video", Filename: tc.filename, ContentType: tc.contentType, URL: server.URL, Size: tc.declaredSize}},
+				Author:            &discordgo.User{ID: "user", Username: "Alice"},
+				MessageReference:  &discordgo.MessageReference{MessageID: "parent", ChannelID: "main"},
+				ReferencedMessage: &discordgo.Message{},
+				Attachments:       []*discordgo.MessageAttachment{{ID: "video", Filename: tc.filename, ContentType: tc.contentType, URL: server.URL, Size: tc.declaredSize}},
 			}})
 			if tc.name == "blacklisted" {
 				assert.Empty(t, b.Remote)
@@ -106,7 +142,7 @@ func TestForwardMediaAttachments(t *testing.T) {
 			}
 			require.Len(t, b.Remote, 1)
 			msg := <-b.Remote
-			assert.Equal(t, "parent", msg.ParentID)
+			assert.Empty(t, msg.ParentID)
 			assert.Equal(t, "Alice", msg.Username)
 			if tc.wantFile {
 				require.Len(t, msg.Extra["file"], 1)

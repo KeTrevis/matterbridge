@@ -165,6 +165,8 @@ type UploadFileParameters struct {
 	ThreadTimestamp string
 	AltTxt          string
 	SnippetType     string
+	Username        string // Requires chat:write.customize.
+	IconURL         string // Requires chat:write.customize.
 }
 
 type GetUploadURLExternalParameters struct {
@@ -199,6 +201,8 @@ type CompleteUploadExternalParameters struct {
 	Channel         string
 	InitialComment  string
 	ThreadTimestamp string
+	Username        string // Requires chat:write.customize.
+	IconURL         string // Requires chat:write.customize.
 }
 
 type CompleteUploadExternalResponse struct {
@@ -517,6 +521,12 @@ func (api *Client) CompleteUploadExternalContext(ctx context.Context, params Com
 	if params.ThreadTimestamp != "" {
 		values.Add("thread_ts", params.ThreadTimestamp)
 	}
+	if params.Username != "" {
+		values.Add("username", params.Username)
+	}
+	if params.IconURL != "" {
+		values.Add("icon_url", params.IconURL)
+	}
 	response := &CompleteUploadExternalResponse{}
 	err = api.postMethod(ctx, "files.completeUploadExternal", values, response)
 	if err != nil {
@@ -578,6 +588,8 @@ func (api *Client) UploadFileContext(ctx context.Context, params UploadFileParam
 		InitialComment:  params.InitialComment,
 		ThreadTimestamp: params.ThreadTimestamp,
 		Blocks:          params.Blocks,
+		Username:        params.Username,
+		IconURL:         params.IconURL,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("CompleteUploadExternal: %w", err)

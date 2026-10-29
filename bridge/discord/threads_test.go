@@ -193,12 +193,13 @@ func TestNativeThreadRootEditAndLegacyReplies(t *testing.T) {
 func TestDiscordThreadIncomingLifecycle(t *testing.T) {
 	b := threadBridge(t, true)
 	require.NoError(t, b.c.State.ChannelAdd(&discordgo.Channel{ID: "root", ParentID: "main", GuildID: "guild", Type: discordgo.ChannelTypeGuildPublicThread}))
-	message := &discordgo.Message{ID: "reply", ChannelID: "root", GuildID: "guild", Content: "hello", Author: &discordgo.User{ID: "human", Username: "Alice"}, MessageReference: &discordgo.MessageReference{ChannelID: "root", MessageID: "another-reply"}}
+	message := &discordgo.Message{ID: "reply", ChannelID: "root", GuildID: "guild", Content: "hello", Author: &discordgo.User{ID: "human", Username: "Alice"}, MessageReference: &discordgo.MessageReference{ChannelID: "root", MessageID: "another-reply"}, ReferencedMessage: &discordgo.Message{Content: "previous reply"}}
 	b.messageCreate(b.c, &discordgo.MessageCreate{Message: message})
 	got := <-b.Remote
 	assert.Equal(t, "ID:main", got.Channel)
 	assert.Equal(t, "root", got.ParentID, "nested Discord replies belong to the Slack root thread")
 	assert.Equal(t, "reply", got.ID)
+	assert.Equal(t, "> previous reply\n\nhello", got.Text)
 	now := time.Now()
 	message.EditedTimestamp = &now
 	b.messageUpdate(b.c, &discordgo.MessageUpdate{Message: message})

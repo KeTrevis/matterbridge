@@ -191,7 +191,9 @@ func TestUploadMediaToSlackPreservesBytesAndThread(t *testing.T) {
 				case "/files.completeUploadExternal":
 					assert.Equal(t, "channel", r.FormValue("channel_id"))
 					assert.Equal(t, "1.0", r.FormValue("thread_ts"))
-					assert.Contains(t, r.FormValue("initial_comment"), "caption")
+					assert.Equal(t, "caption", r.FormValue("initial_comment"))
+					assert.Equal(t, "Alice [Discord]", r.FormValue("username"))
+					assert.Equal(t, "https://example.com/alice.png", r.FormValue("icon_url"))
 					_, _ = io.WriteString(w, `{"ok":true,"files":[{"id":"file"}]}`)
 				case "/files.info":
 					_, _ = io.WriteString(w, `{"ok":true,"file":{"id":"file","shares":{"private":{"channel":[{"ts":"2.0"}]}}}}`)
@@ -202,11 +204,8 @@ func TestUploadMediaToSlackPreservesBytesAndThread(t *testing.T) {
 			}))
 			defer server.Close()
 			endpoint = server.URL
-			logger := logrus.New()
-			logger.SetOutput(io.Discard)
-			b := newBridge(&bridge.Config{Bridge: &bridge.Bridge{Log: logrus.NewEntry(logger)}})
-			b.sc = slack.New("test-token", slack.OptionAPIURL(server.URL+"/"))
-			id, err := b.uploadFile(&config.Message{Username: "Alice", ParentID: "1.0", Extra: map[string][]interface{}{
+			b := identityTestBridge(server.URL, false)
+			id, err := b.uploadFile(&config.Message{Account: "discord.test", Username: "Alice [Discord]", Avatar: "https://example.com/alice.png", ParentID: "1.0", Extra: map[string][]interface{}{
 				"file": {config.FileInfo{Name: filename, Data: &data, Comment: "caption"}},
 			}}, "channel")
 			require.NoError(t, err)
