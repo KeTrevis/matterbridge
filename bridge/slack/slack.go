@@ -333,14 +333,19 @@ func (b *Bslack) sendSocket(msg config.Message) (string, error) {
 		extraMsgs := helper.HandleExtra(&msg, b.General)
 		for i := range extraMsgs {
 			rmsg := &extraMsgs[i]
-			rmsg.Text = rmsg.Username + rmsg.Text
+			rmsg.Username, rmsg.Avatar, rmsg.ParentID = msg.Username, msg.Avatar, msg.ParentID
+			if b.GetBool(useNickPrefixConfig) {
+				rmsg.Text = rmsg.Username + rmsg.Text
+			}
 			_, err = b.postMessage(rmsg, channelInfo)
 			if err != nil {
 				b.Log.Error(err)
 			}
 		}
 		// Upload files if necessary (from Slack, Telegram or Mattermost).
-		return b.uploadFile(&msg, channelInfo.ID)
+		if len(msg.Extra["file"]) > 0 {
+			return b.uploadFile(&msg, channelInfo.ID)
+		}
 	}
 
 	// Post message.
@@ -433,7 +438,7 @@ func (b *Bslack) editMessage(msg *config.Message, channelInfo *slack.Channel) (b
 
 func (b *Bslack) postMessage(msg *config.Message, channelInfo *slack.Channel) (string, error) {
 	// don't post empty messages
-	if msg.Text == "" {
+	if msg.Text == "" && len(msg.Extra["attachments"]) == 0 && len(msg.Extra[sSlackAttachment]) == 0 {
 		return "", nil
 	}
 	messageOptions := b.prepareMessageOptions(msg)
@@ -453,23 +458,34 @@ func (b *Bslack) postMessage(msg *config.Message, channelInfo *slack.Channel) (s
 // uploadFile handles native upload of files
 func (b *Bslack) uploadFile(msg *config.Message, channelID string) (string, error) {
 	var messageID string
+	messageText := msg.Text
 	for _, f := range msg.Extra["file"] {
 		fi, ok := f.(config.FileInfo)
 		if !ok {
 			b.Log.Errorf("Received a file with unexpected content: %#v", f)
 			continue
 		}
-		if msg.Text == fi.Comment {
-			msg.Text = ""
-		}
 		// Because the result of the UploadFile is slower than the MessageEvent from slack
 		// we can't match on the file ID yet, so we have to match on the filename too.
 		ts := time.Now()
 		b.Log.Debugf("Adding file %s to cache at %s with timestamp", fi.Name, ts.String())
 		b.cache.Add("filename"+fi.Name, ts)
-		initialComment := fmt.Sprintf("File from %s", msg.Username)
-		if fi.Comment != "" {
-			initialComment += fmt.Sprintf(" with comment: %s", fi.Comment)
+		initialComment := messageText
+		if fi.Comment != "" && fi.Comment != messageText {
+			if initialComment != "" {
+				initialComment += "\n"
+			}
+			initialComment += fi.Comment
+		}
+		username, iconURL := "", ""
+		if b.GetBool(useNickPrefixConfig) {
+			initialComment = fmt.Sprintf("File from %s\n%s", msg.Username, initialComment)
+		} else {
+			username = msg.Username
+			iconURL = msg.Avatar
+			if iconURL == "" {
+				iconURL = config.GetIconURL(msg, b.GetString(iconURLConfig))
+			}
 		}
 
 		res, err := b.sc.UploadFile(slack.UploadFileParameters{
@@ -479,11 +495,14 @@ func (b *Bslack) uploadFile(msg *config.Message, channelID string) (string, erro
 			Channel:         channelID,
 			InitialComment:  initialComment,
 			ThreadTimestamp: msg.ParentID,
+			Username:        username,
+			IconURL:         iconURL,
 		})
 		if err != nil {
 			b.Log.Errorf("uploadfile %#v", err)
 			return "", err
 		}
+		messageText = ""
 		if res.ID != "" {
 			b.Log.Debugf("Adding file ID %s to cache with timestamp %s", res.ID, ts.String())
 			b.cache.Add("file"+res.ID, ts)
@@ -538,15 +557,16 @@ func (b *Bslack) prepareMessageOptions(msg *config.Message) []slack.MsgOption {
 		// provide regular text field (fallback used in Slack notifications, etc.)
 		slack.MsgOptionText(msg.Text, false),
 
-		// add a callback ID so we can see we created it
-		slack.MsgOptionBlocks(slack.NewSectionBlock(
+		slack.MsgOptionEnableLinkUnfurl(),
+	)
+	if msg.Text != "" {
+		// Add a callback ID to text messages; attachment-only messages cannot have an empty section.
+		opts = append(opts, slack.MsgOptionBlocks(slack.NewSectionBlock(
 			slack.NewTextBlockObject(slack.MarkdownType, msg.Text, false, false),
 			nil, nil,
 			slack.SectionBlockOptionBlockID("matterbridge_"+b.uuid),
-		)),
-
-		slack.MsgOptionEnableLinkUnfurl(),
-	)
+		)))
+	}
 	opts = append(opts, slack.MsgOptionAttachments(attachments...))
 	opts = append(opts, slack.MsgOptionPostMessageParameters(params))
 	return opts

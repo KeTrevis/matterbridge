@@ -115,7 +115,13 @@ func (b *Bdiscord) messageCreate(s *discordgo.Session, m *discordgo.MessageCreat
 		return
 	}
 
-	rmsg := config.Message{Account: b.Account, Avatar: "https://cdn.discordapp.com/avatars/" + m.Author.ID + "/" + m.Author.Avatar + ".jpg", UserID: m.Author.ID, ID: m.ID}
+	avatar := m.Author.AvatarURL("")
+	if m.Member != nil && m.Member.Avatar != "" {
+		member := *m.Member
+		member.User, member.GuildID = m.Author, m.GuildID
+		avatar = member.AvatarURL("")
+	}
+	rmsg := config.Message{Account: b.Account, Avatar: avatar, UserID: m.Author.ID, ID: m.ID}
 
 	b.Log.Debugf("== Receiving event %#v", m.Message)
 
@@ -133,7 +139,11 @@ func (b *Bdiscord) messageCreate(s *discordgo.Session, m *discordgo.MessageCreat
 
 	fromWebhook := m.WebhookID != ""
 	if !fromWebhook && !b.GetBool("UseUserName") {
-		rmsg.Username = b.getNick(m.Author, m.GuildID)
+		if m.Member != nil && m.Member.Nick != "" {
+			rmsg.Username = m.Member.Nick
+		} else {
+			rmsg.Username = b.getNick(m.Author, m.GuildID)
+		}
 	} else {
 		rmsg.Username = m.Author.Username
 		if !fromWebhook && b.GetBool("UseDiscriminator") {

@@ -73,7 +73,7 @@ le retour arrière. Leur nettoyage reste manuel.
 
 ## Nom et avatar des auteurs
 
-Les messages texte affichent le nom et l’avatar de leur auteur, avec le suffixe
+Les messages texte et les fichiers affichent le nom et l’avatar de leur auteur, avec le suffixe
 `[Slack]` ou `[Discord]`, y compris dans les threads. Le nom n’est plus ajouté
 au début du texte. Cela concerne les nouveaux messages, sans renommer les anciens.
 
@@ -84,5 +84,15 @@ L’application Slack doit avoir le scope **chat:write.customize** ; si ce scope
 vient d’être ajouté, réinstaller l’application dans le workspace pour l’accorder.
 Le manifeste fourni contient déjà ce scope.
 
-Les fichiers envoyés vers Slack utilisent toujours l’identité de l’application,
-avec le nom de l’auteur dans le commentaire du fichier.
+Les fichiers Slack utilisent `username` et `icon_url` sur
+`files.completeUploadExternal`, avec le même scope `chat:write.customize` que
+les messages texte. Le texte accompagnant un fichier est conservé sans ajouter
+« File from… ». L’extension correspondante est incluse dans notre copie vendored
+de `slack-go/slack/files.go` ; la conserver lors d’une régénération du vendor.
+
+Sur Discord, les noms de webhook sont limités à 80 caractères ; les noms plus
+longs sont tronqués sans couper les caractères UTF-8. Les avatars par défaut,
+animés et propres au serveur sont pris en charge. Les messages déjà envoyés
+conservent leur identité initiale ; ce changement s’applique aux nouveaux envois.
+Les réponses gardent leur identité grâce à `UseNativeThreads = true` et
+`AutoWebhooks = true`, activés dans les configurations fournies.
