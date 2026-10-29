@@ -79,6 +79,13 @@ func (gw *Gateway) FindCanonicalMsgID(protocol string, mID string) string {
 			if ID == downstreamMsgObj.ID {
 				return mid.(string)
 			}
+			if protocol == "discord" && strings.HasPrefix(downstreamMsgObj.ID, "discord ") {
+				for _, part := range strings.Split(strings.TrimPrefix(downstreamMsgObj.ID, "discord "), ";") {
+					if part == mID {
+						return mid.(string)
+					}
+				}
+			}
 		}
 	}
 	return ""

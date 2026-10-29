@@ -175,6 +175,7 @@ type Protocol struct {
 	UseDiscriminator       bool       // discord
 	UseFirstName           bool       // telegram
 	UseUserName            bool       // discord, matrix, mattermost
+	UseNativeThreads       bool       // discord
 	UseInsecureURL         bool       // telegram
 	UserName               string     // IRC
 	VerboseJoinPart        bool       // IRC

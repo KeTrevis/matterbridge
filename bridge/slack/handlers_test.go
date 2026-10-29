@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/42wim/matterbridge/bridge"
+	"github.com/42wim/matterbridge/bridge/config"
 	"github.com/sirupsen/logrus"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
@@ -49,4 +50,30 @@ func TestSkipMessageEventDoesNotDropRegularMessages(t *testing.T) {
 
 	assert.False(t, b.skipMessageEvent(&ev),
 		"a plain message from a real human user must not be skipped")
+}
+
+func TestPopulateThreadParent(t *testing.T) {
+	logger := logrus.New()
+	logger.SetOutput(io.Discard)
+	br := bridge.New(&config.Bridge{Account: "slack.test"})
+	br.Config = config.NewConfigFromString(logger, []byte("[slack.test]\n"))
+	br.Log = logrus.NewEntry(logger)
+	b := newBridge(&bridge.Config{Bridge: br})
+	b.channels = newChannelManager(br.Log, nil)
+	b.channels.channelsByID["channel"] = &slack.Channel{GroupConversation: slack.GroupConversation{Conversation: slack.Conversation{ID: "channel"}, Name: "general"}}
+	for _, tc := range []struct {
+		name   string
+		parent string
+		want   string
+	}{
+		{"root message or edit", "1.0", ""},
+		{"thread reply", "0.5", "0.5"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ev := &slackevents.MessageEvent{Channel: "channel", TimeStamp: "1.0", Message: &slack.Msg{Timestamp: "1.0", ThreadTimestamp: tc.parent}}
+			msg, err := b.populateReceivedMessage(ev)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, msg.ParentID)
+		})
+	}
 }

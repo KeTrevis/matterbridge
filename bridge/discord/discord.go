@@ -65,6 +65,9 @@ func New(cfg *bridge.Config) bridge.Bridger {
 }
 
 func (b *Bdiscord) Connect() error {
+	if b.GetBool("UseNativeThreads") && !b.GetBool("PreserveThreading") {
+		return fmt.Errorf("UseNativeThreads requires PreserveThreading")
+	}
 	var err error
 	token := b.GetString("Token")
 	b.Log.Info("Connecting")
@@ -256,6 +259,15 @@ func (b *Bdiscord) Send(msg config.Message) (string, error) {
 	if channelID == "" {
 		return "", fmt.Errorf("Could not find channelID for %v", msg.Channel)
 	}
+	parentChannelID := channelID
+	if b.GetBool("UseNativeThreads") {
+		var err error
+		channelID, err = b.nativeThreadChannel(&msg, channelID)
+		if err != nil {
+			return "", err
+		}
+	}
+	inThread := channelID != parentChannelID
 
 	if msg.Event == config.EventUserTyping {
 		if b.GetBool("ShowUserTyping") {
@@ -277,11 +289,19 @@ func (b *Bdiscord) Send(msg config.Message) (string, error) {
 
 	// Use webhook to send the message
 	useWebhooks := b.shouldMessageUseWebhooks(&msg)
-	if useWebhooks && msg.Event != config.EventMsgDelete && msg.ParentID == "" {
+	if useWebhooks && !inThread && msg.Event != config.EventMsgDelete && msg.ParentID == "" {
 		return b.handleEventWebhook(&msg, channelID)
 	}
 
-	return b.handleEventBotUser(&msg, channelID)
+	ids, err := b.handleEventBotUser(&msg, channelID)
+	if inThread && err == nil {
+		for _, id := range strings.Split(ids, ";") {
+			if id != "" {
+				b.cache.Add(cThreadMessage+id, channelID)
+			}
+		}
+	}
+	return ids, err
 }
 
 // handleEventDirect handles events via the bot user
@@ -293,8 +313,12 @@ func (b *Bdiscord) handleEventBotUser(msg *config.Message, channelID string) (st
 		if msg.ID == "" {
 			return "", nil
 		}
-		err := b.c.ChannelMessageDelete(channelID, msg.ID)
-		return "", err
+		for _, id := range strings.Split(msg.ID, ";") {
+			if err := b.c.ChannelMessageDelete(channelID, id); err != nil {
+				return "", err
+			}
+		}
+		return "", nil
 	}
 
 	// Delete a file
@@ -304,9 +328,16 @@ func (b *Bdiscord) handleEventBotUser(msg *config.Message, channelID string) (st
 		}
 
 		if fi, ok := b.cache.Get(cFileUpload + msg.ID); ok {
-			err := b.c.ChannelMessageDelete(channelID, fi.(string)) // nolint:forcetypeassert
+			fileID := fi.(string) // nolint:forcetypeassert
+			if target, ok := b.cache.Get(cThreadMessage + fileID); ok {
+				channelID = target.(string)
+			}
+			err := b.c.ChannelMessageDelete(channelID, fileID)
+			if err != nil {
+				return "", err
+			}
 			b.cache.Remove(cFileUpload + msg.ID)
-			return "", err
+			return "", nil
 		}
 
 		return "", fmt.Errorf("file %s not found", msg.ID)
@@ -378,6 +409,7 @@ func (b *Bdiscord) handleEventBotUser(msg *config.Message, channelID string) (st
 
 // handleUploadFile handles native upload of files
 func (b *Bdiscord) handleUploadFile(msg *config.Message, channelID string) (string, error) {
+	var ids []string
 	for _, f := range msg.Extra["file"] {
 		fi := f.(config.FileInfo)
 		file := discordgo.File{
@@ -398,7 +430,8 @@ func (b *Bdiscord) handleUploadFile(msg *config.Message, channelID string) (stri
 		// link file_upload_nativeID (file ID from the original bridge) to our upload id
 		// so that we can remove this later when it eg needs to be deleted
 		b.cache.Add(cFileUpload+fi.NativeID, res.ID)
+		ids = append(ids, res.ID)
 	}
 
-	return "", nil
+	return strings.Join(ids, ";"), nil
 }

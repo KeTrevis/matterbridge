@@ -12,7 +12,9 @@ func (b *Bdiscord) messageDelete(s *discordgo.Session, m *discordgo.MessageDelet
 		return
 	}
 	rmsg := config.Message{Account: b.Account, ID: m.ID, Event: config.EventMsgDelete, Text: config.EventMsgDelete}
-	rmsg.Channel = b.getChannelName(m.ChannelID)
+	if !b.routeIncomingThread(&rmsg, m.ChannelID) {
+		return
+	}
 
 	b.Log.Debugf("<= Sending message from %s to gateway", b.Account)
 	b.Log.Debugf("<= Message is %#v", rmsg)
@@ -32,6 +34,9 @@ func (b *Bdiscord) messageDeleteBulk(s *discordgo.Session, m *discordgo.MessageD
 			Event:   config.EventMsgDelete,
 			Text:    config.EventMsgDelete,
 			Channel: b.getChannelName(m.ChannelID),
+		}
+		if !b.routeIncomingThread(&rmsg, m.ChannelID) {
+			continue
 		}
 
 		b.Log.Debugf("<= Sending message from %s to gateway", b.Account)
@@ -88,6 +93,9 @@ func (b *Bdiscord) messageCreate(s *discordgo.Session, m *discordgo.MessageCreat
 		return
 	}
 	var err error
+	if m.Author == nil || m.Type == discordgo.MessageTypeThreadCreated || m.Type == discordgo.MessageTypeThreadStarterMessage {
+		return
+	}
 
 	// not relay our own messages
 	if m.Author.Username == b.nick {
@@ -156,6 +164,9 @@ func (b *Bdiscord) messageCreate(s *discordgo.Session, m *discordgo.MessageCreat
 	// Add our parent id if it exists, and if it's not referring to a message in another channel
 	if ref := m.MessageReference; ref != nil && ref.ChannelID == m.ChannelID {
 		rmsg.ParentID = ref.MessageID
+	}
+	if !b.routeIncomingThread(&rmsg, m.ChannelID) {
+		return
 	}
 
 	b.Log.Debugf("<= Sending message from %s on %s to gateway", m.Author.Username, b.Account)

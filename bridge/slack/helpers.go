@@ -49,6 +49,9 @@ func (b *Bslack) populateReceivedMessage(ev *slackevents.MessageEvent) (*config.
 	if ev.Message != nil {
 		rmsg.ParentID = ev.Message.ThreadTimestamp
 	}
+	if rmsg.ParentID == rmsg.ID {
+		rmsg.ParentID = ""
+	}
 
 	if err = b.populateMessageWithUserInfo(ev, rmsg); err != nil {
 		return nil, err

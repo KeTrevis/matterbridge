@@ -6,12 +6,47 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/42wim/matterbridge/bridge"
 	"github.com/42wim/matterbridge/bridge/config"
 	"github.com/42wim/matterbridge/gateway/bridgemap"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
+
+type threadDestination struct {
+	bridge.Bridger
+	message config.Message
+}
+
+func (d *threadDestination) Send(msg config.Message) (string, error) {
+	d.message = msg
+	return "slack-reply", nil
+}
+
+func TestDiscordThreadRoutesToSlackRoot(t *testing.T) {
+	for _, source := range []string{"slack", "discord"} {
+		t.Run(source, func(t *testing.T) {
+			gw := maketestRouter(testconfig).Gateways["bridge1"]
+			discord := gw.Bridges["discord.test"]
+			slack := gw.Bridges["slack.test"]
+			slack.Config = &config.TestConfig{Config: slack.Config, Overrides: map[string]interface{}{"slack.test.PreserveThreading": true}}
+			capture := &threadDestination{}
+			slack.Bridger = capture
+			if source == "slack" {
+				gw.Messages.Add("slack 1.0", []*BrMsgID{{discord, "discord root;split-part", "generaldiscord.test"}})
+				assert.Equal(t, "slack 1.0", gw.FindCanonicalMsgID("discord", "split-part"))
+			} else {
+				gw.Messages.Add("discord root", []*BrMsgID{{slack, "slack 1.0", "testingslack.test"}})
+			}
+			ids := gw.handleMessage(&config.Message{ID: "reply", ParentID: "root", Channel: "general", Account: "discord.test", Protocol: "discord", Gateway: "bridge1", Text: "in thread"}, slack)
+			require.Len(t, ids, 1)
+			assert.Equal(t, "1.0", capture.message.ParentID)
+			assert.Equal(t, "testing", capture.message.Channel)
+		})
+	}
+}
 
 var testconfig = []byte(`
 [irc.freenode]

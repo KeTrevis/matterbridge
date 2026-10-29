@@ -12,6 +12,7 @@ RemoteNickFormat = "[Slack] {NICK}: "
 AutoWebhooks = false
 AllowMention = []
 PreserveThreading = true
+UseNativeThreads = true
 
 [[gateway]]
 name = "le-fond"
