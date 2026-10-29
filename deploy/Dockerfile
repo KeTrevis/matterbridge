@@ -2,7 +2,7 @@ FROM golang:1.25-alpine AS build
 RUN apk add --no-cache mailcap
 WORKDIR /src
 COPY . .
-RUN CGO_ENABLED=0 go test -p 2 -mod=vendor ./bridge/slack/... ./bridge/discord/... ./gateway/... \
+RUN CGO_ENABLED=0 go test -p 2 -mod=vendor ./bridge/helper ./bridge/slack/... ./bridge/discord/... ./gateway/... \
     && CGO_ENABLED=0 go build -p 2 -mod=vendor -trimpath \
     -ldflags "-s -w -X github.com/42wim/matterbridge/version.GitHash=local" \
     -o /matterbridge .

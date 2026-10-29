@@ -15,6 +15,7 @@ services:
       MATTERBRIDGE_DISCORD_MAIN_TOKEN: ${TEST_DISCORD_BOT_TOKEN:?Discord test token missing}
     volumes:
       - ./matterbridge.test.toml:/etc/matterbridge/matterbridge.toml:ro
+      - ./reaction-emojis.json:/etc/matterbridge/reaction-emojis.json:ro
       - bridge-data:/var/lib/matterbridge
     logging:
       driver: json-file

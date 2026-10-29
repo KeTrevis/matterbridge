@@ -14,6 +14,7 @@ set +a
 export MATTERBRIDGE_SLACK_MAIN_TOKEN="$TEST_SLACK_BOT_TOKEN"
 export MATTERBRIDGE_SLACK_MAIN_APPTOKEN="$TEST_SLACK_APP_TOKEN"
 export MATTERBRIDGE_DISCORD_MAIN_TOKEN="$TEST_DISCORD_BOT_TOKEN"
+export MATTERBRIDGE_GENERAL_REACTIONEMOJIMAPPINGFILE="$PWD/deploy/reaction-emojis.json"
 mkdir -p data/test
 go build -p 2 -mod=vendor -o data/test/matterbridge .
 cd data/test

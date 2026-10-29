@@ -41,6 +41,7 @@ type Bdiscord struct {
 	useAutoWebhooks bool
 	transmitter     *transmitter.Transmitter
 	cache           *lru.Cache
+	reactionEmojis  helper.ReactionEmojiMap
 }
 
 func New(cfg *bridge.Config) bridge.Bridger {
@@ -70,6 +71,10 @@ func (b *Bdiscord) Connect() error {
 		return fmt.Errorf("UseNativeThreads requires PreserveThreading")
 	}
 	var err error
+	b.reactionEmojis, err = helper.LoadReactionEmojiMap(b.GetString("ReactionEmojiMappingFile"))
+	if err != nil {
+		return err
+	}
 	token := b.GetString("Token")
 	b.Log.Info("Connecting")
 	if !strings.HasPrefix(b.GetString("Token"), "Bot ") {

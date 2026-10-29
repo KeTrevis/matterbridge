@@ -34,9 +34,10 @@ type Bslack struct {
 	uuid         string
 	useChannelID bool
 
-	channels *channels
-	users    *users
-	legacy   bool
+	channels       *channels
+	users          *users
+	legacy         bool
+	reactionEmojis helper.ReactionEmojiMap
 }
 
 const (
@@ -111,6 +112,11 @@ func (b *Bslack) Command(cmd string) string {
 func (b *Bslack) Connect() error {
 	b.RLock()
 	defer b.RUnlock()
+	var err error
+	b.reactionEmojis, err = helper.LoadReactionEmojiMap(b.GetString("ReactionEmojiMappingFile"))
+	if err != nil {
+		return err
+	}
 
 	if b.GetString(incomingWebhookConfig) == "" && b.GetString(outgoingWebhookConfig) == "" && b.GetString(tokenConfig) == "" {
 		return errors.New("no connection method found: WebhookBindAddress, WebhookURL or Token need to be configured")

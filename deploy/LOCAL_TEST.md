@@ -105,6 +105,44 @@ l'autre plateforme : il reste présent tant qu'au moins une personne l'utilise
 à la source. Les compteurs et les noms des personnes ne sont pas reproduits.
 Les réactions du bot sont ignorées pour éviter les boucles.
 
+Les correspondances personnalisées sont définies dans un seul fichier versionné,
+[`reaction-emojis.json`](reaction-emojis.json), chargé au démarrage :
+
+```json
+{ "brilliant": "bangbang" }
+```
+
+Les clés sont les noms Slack sans `:`. Les valeurs sont des noms Discord
+standard (`bangbang`), des emojis Unicode (`‼️`) ou `nom:ID` pour un emoji
+personnalisé du serveur. Chaque paire est automatiquement utilisée dans les deux
+sens : cet exemple envoie `:brilliant:` vers `‼️` et traduit `‼️` en
+`:brilliant:` au retour. Les réactions standard sans mapping continuent à
+fonctionner.
+
+Deux noms Slack ne peuvent pas cibler le même emoji Discord : l’inverse serait
+ambigu. Les variantes équivalentes (`bangbang`, `‼️` et `‼`) sont reconnues.
+Un JSON invalide ou une correspondance ambiguë empêche le démarrage.
+
+Sur le serveur, le fichier reste dans le clone Git :
+`~/slack-discord-bridge/source/deploy/reaction-emojis.json`. Pour une mise à jour
+versionnée, modifier le JSON, commiter et pousser, puis lancer
+`./scripts/update-server.sh`. Après une modification manuelle sur le serveur,
+recréer le conteneur sans reconstruire l’image :
+
+```sh
+cd ~/slack-discord-bridge
+docker compose up -d --no-build --force-recreate bridge
+```
+
+En local natif, `scripts/test-local.sh` utilise le même JSON du dépôt ; Docker
+le monte en lecture seule. L’option `ReactionEmojiMappingFile` permet de choisir
+son chemin ; sans fichier configuré, seules les réactions standard sont converties.
+
+Les réactions qui ciblent le même emoji sont regroupées : retirer `brilliant`
+sur Slack conserve la réaction distante tant que `bangbang` est encore utilisée
+par une personne, et réciproquement. Sur Discord, les correspondances et les
+réactions standard ciblant le même nom Slack sont également regroupées.
+
 Dans l'application Slack, ajouter le scope **reactions:write** (en plus de
 **reactions:read**) et les événements **reaction_added** et **reaction_removed**,
 puis réinstaller l'application dans le workspace. Les deux manifestes fournis
@@ -114,7 +152,7 @@ incluent ces paramètres. Le bot Discord doit avoir **Ajouter des réactions** e
 Seuls les messages dont le bridge possède encore la correspondance peuvent
 recevoir une réaction synchronisée ; SQLite conserve ces correspondances après
 redémarrage. Les réactions déjà présentes avant le lancement ne sont pas reprises
-automatiquement. Les emojis personnalisés, les Super Réactions Discord et les
+automatiquement. Les emojis personnalisés non mappés, les Super Réactions Discord et les
 suppressions groupées par modération ne sont pas synchronisés. Slack doit utiliser
 la connexion Socket Mode avec token bot.
 

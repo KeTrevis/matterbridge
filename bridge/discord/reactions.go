@@ -16,8 +16,11 @@ func (b *Bdiscord) reactionRemove(_ *discordgo.Session, event *discordgo.Message
 }
 
 func (b *Bdiscord) receiveReaction(event *discordgo.MessageReaction) {
-	// shortcut: custom emoji require an explicit cross-platform mapping when needed.
-	if event.GuildID != b.guildID || event.UserID == b.userID || event.Emoji.ID != "" {
+	if event.GuildID != b.guildID || event.UserID == b.userID {
+		return
+	}
+	emoji := event.Emoji.APIName()
+	if event.Emoji.ID != "" && b.reactionEmojis.Slack(emoji) == "" {
 		return
 	}
 	// Serialize snapshots so concurrent gateway callbacks cannot relay stale counts last.
@@ -27,19 +30,37 @@ func (b *Bdiscord) receiveReaction(event *discordgo.MessageReaction) {
 	if !b.routeIncomingThread(&msg, event.ChannelID) || msg.Channel == "" {
 		return
 	}
-	// Two users suffice: at most one can be the bridge's own bot.
-	users, err := b.c.MessageReactions(event.ChannelID, event.MessageID, event.Emoji.Name, 2, "", "")
-	if err != nil {
-		b.Log.WithError(err).Warn("Could not read Discord reactions")
-		return
-	}
 	active := false
-	for _, user := range users {
-		if user.ID != b.userID {
-			active = true
+	if len(b.reactionEmojis) > 0 {
+		// Several Discord emoji can target one Slack reaction, including standard aliases.
+		current, err := b.c.ChannelMessage(event.ChannelID, event.MessageID)
+		if err != nil {
+			b.Log.WithError(err).Warn("Could not read Discord reactions")
+			return
+		}
+		target := b.reactionEmojis.Slack(emoji)
+		for _, reaction := range current.Reactions {
+			if b.reactionEmojis.Slack(reaction.Emoji.APIName()) != target {
+				continue
+			}
+			count := reaction.Count
+			if reaction.Me {
+				count--
+			}
+			active = active || count > 0
+		}
+	} else {
+		// Two users suffice: at most one can be the bridge's own bot.
+		users, err := b.c.MessageReactions(event.ChannelID, event.MessageID, emoji, 2, "", "")
+		if err != nil {
+			b.Log.WithError(err).Warn("Could not read Discord reactions")
+			return
+		}
+		for _, user := range users {
+			active = active || user.ID != b.userID
 		}
 	}
-	msg.Reaction = &config.Reaction{Emoji: event.Emoji.Name, Remove: !active}
+	msg.Reaction = &config.Reaction{Emoji: emoji, Remove: !active}
 	b.Remote <- msg
 }
 

@@ -1697,6 +1697,10 @@ RemoteNickFormat="{NICK}"
 # The parent directory must exist and be writable. Empty keeps the in-memory cache only.
 MessageStorePath=""
 
+#JSON mapping from Slack names to Discord emoji; automatically inverted for Discord -> Slack.
+#Discord emoji may be a standard name, Unicode or name:ID. Loaded on connection.
+ReactionEmojiMappingFile=""
+
 ## RELOADABLE SETTINGS
 ## Settings below can be reloaded by editing the file
 

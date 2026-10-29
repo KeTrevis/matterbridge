@@ -29,6 +29,7 @@ main() {
     next=".compose-$release.yaml"
     sed -e "s|context: ..$|context: $source_dir|" \
         -e "s|image: slack-discord-bridge:local$|image: slack-discord-bridge:$release|" \
+        -e "s|./reaction-emojis.json:|./$source_dir/deploy/reaction-emojis.json:|" \
         "$source_dir/deploy/compose.yaml" > "$next"
     compose() { docker compose -p slack-discord-bridge --env-file .env -f "$1" "${@:2}"; }
     trap 'rm -f "${next:-}"' EXIT

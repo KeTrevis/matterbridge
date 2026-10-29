@@ -17,8 +17,9 @@ class DeployTests(unittest.TestCase):
                 (install / name).write_text(content)
             source = home / "upstream/deploy"
             source.mkdir(parents=True)
-            (source / "compose.yaml").write_text("context: ..\nimage: slack-discord-bridge:local\n")
+            (source / "compose.yaml").write_text("context: ..\nimage: slack-discord-bridge:local\nvolumes:\n  - ./reaction-emojis.json:/etc/matterbridge/reaction-emojis.json:ro\n")
             (source / "matterbridge.toml").write_text("old source config" if update else "new config")
+            (source / "reaction-emojis.json").write_text('{"brilliant":"bangbang"}')
             repo = source.parent
             def git(*args, cwd=repo):
                 return subprocess.check_output(["git", *args], cwd=cwd, text=True, stderr=subprocess.DEVNULL).strip()
@@ -66,6 +67,8 @@ fi
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual((install / "matterbridge.toml").read_text(), "new config")
                 self.assertIn("context: source", (install / "compose.yaml").read_text())
+                self.assertIn("./source/deploy/reaction-emojis.json:", (install / "compose.yaml").read_text())
+                self.assertFalse((install / "reaction-emojis.json").exists())
 
     def test_success(self):
         self.remote_run("")

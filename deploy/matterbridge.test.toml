@@ -1,6 +1,7 @@
 [general]
 MediaDownloadSize = 10000000
 MessageStorePath = "message-links.sqlite3"
+ReactionEmojiMappingFile = "/etc/matterbridge/reaction-emojis.json"
 
 [slack.main]
 Token = ""

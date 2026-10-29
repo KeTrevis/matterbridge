@@ -94,6 +94,8 @@ type ChannelMember struct {
 type ChannelMembers []ChannelMember
 
 type Protocol struct {
+	ReactionEmojiMappingFile string // Slack/Discord: JSON mapping, loaded on connection
+
 	AllowMention           []string // discord
 	AuthCode               string   // steam
 	BindAddress            string   // mattermost, slack // DEPRECATED
