@@ -1,7 +1,16 @@
 package bdiscord
 
 import (
+	"fmt"
+	"io"
+	"mime"
+	"net/http"
+	"path/filepath"
+	"strings"
+	"time"
+
 	"github.com/42wim/matterbridge/bridge/config"
+	"github.com/42wim/matterbridge/bridge/helper"
 	"github.com/bwmarrin/discordgo"
 	"github.com/davecgh/go-spew/spew"
 )
@@ -106,13 +115,6 @@ func (b *Bdiscord) messageCreate(s *discordgo.Session, m *discordgo.MessageCreat
 		return
 	}
 
-	// add the url of the attachments to content
-	if len(m.Attachments) > 0 {
-		for _, attach := range m.Attachments {
-			m.Content = m.Content + "\n" + attach.URL
-		}
-	}
-
 	rmsg := config.Message{Account: b.Account, Avatar: "https://cdn.discordapp.com/avatars/" + m.Author.ID + "/" + m.Author.Avatar + ".jpg", UserID: m.Author.ID, ID: m.ID}
 
 	b.Log.Debugf("== Receiving event %#v", m.Message)
@@ -146,11 +148,6 @@ func (b *Bdiscord) messageCreate(s *discordgo.Session, m *discordgo.MessageCreat
 		}
 	}
 
-	// no empty messages
-	if rmsg.Text == "" {
-		return
-	}
-
 	// do we have a /me action
 	var ok bool
 	rmsg.Text, ok = b.replaceAction(rmsg.Text)
@@ -169,9 +166,61 @@ func (b *Bdiscord) messageCreate(s *discordgo.Session, m *discordgo.MessageCreat
 		return
 	}
 
+	b.handleAttachments(m.Attachments, &rmsg)
+	if rmsg.Text == "" && len(rmsg.Extra["file"]) == 0 && rmsg.Event == "" {
+		return
+	}
+
 	b.Log.Debugf("<= Sending message from %s on %s to gateway", m.Author.Username, b.Account)
 	b.Log.Debugf("<= Message is %#v", rmsg)
 	b.Remote <- rmsg
+}
+
+func (b *Bdiscord) handleAttachments(attachments []*discordgo.MessageAttachment, rmsg *config.Message) {
+	for _, attach := range attachments {
+		if strings.HasPrefix(attach.ContentType, "video/") || strings.HasPrefix(mime.TypeByExtension(strings.ToLower(filepath.Ext(attach.Filename))), "video/") {
+			if rmsg.Extra == nil {
+				rmsg.Extra = make(map[string][]interface{})
+			}
+			if err := helper.HandleDownloadSize(b.Log, rmsg, attach.Filename, int64(attach.Size), b.General); err != nil {
+				b.Log.WithError(err).Info("Skipping download of incoming video")
+				continue
+			}
+			data, err := b.downloadVideo(attach.URL)
+			if err == nil {
+				helper.HandleDownloadData2(b.Log, rmsg, attach.Filename, attach.ID, "", attach.URL, &data, b.General)
+				continue
+			}
+			b.Log.WithError(err).Error("Could not download incoming video")
+		}
+		rmsg.Text += "\n" + attach.URL
+	}
+	if len(rmsg.Extra["file"]) > 0 {
+		file := rmsg.Extra["file"][0].(config.FileInfo)
+		file.Comment = rmsg.Text
+		rmsg.Extra["file"][0] = file
+		rmsg.Text = ""
+	}
+}
+
+func (b *Bdiscord) downloadVideo(url string) ([]byte, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("video download returned HTTP %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, int64(b.General.MediaDownloadSize)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > b.General.MediaDownloadSize {
+		return nil, fmt.Errorf("video exceeds MediaDownloadSize (%d)", b.General.MediaDownloadSize)
+	}
+	return data, nil
 }
 
 func (b *Bdiscord) memberUpdate(s *discordgo.Session, m *discordgo.GuildMemberUpdate) {

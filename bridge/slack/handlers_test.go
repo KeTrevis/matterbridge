@@ -3,6 +3,8 @@ package bslack
 import (
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/42wim/matterbridge/bridge"
@@ -74,6 +76,44 @@ func TestPopulateThreadParent(t *testing.T) {
 			msg, err := b.populateReceivedMessage(ev)
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, msg.ParentID)
+		})
+	}
+}
+
+func TestDownloadVideo(t *testing.T) {
+	for _, privateOnly := range []bool{false, true} {
+		t.Run(map[bool]string{false: "download URL", true: "private URL fallback"}[privateOnly], func(t *testing.T) {
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+				_, _ = io.WriteString(w, "video")
+			}))
+			defer server.Close()
+			logger := logrus.New()
+			logger.SetOutput(io.Discard)
+			br := bridge.New(&config.Bridge{Account: "slack.test"})
+			br.Config = config.NewConfigFromString(logger, []byte("[slack.test]\nToken=\"test-token\"\n"))
+			br.Log = logrus.NewEntry(logger)
+			br.General = &config.Protocol{MediaDownloadSize: 20}
+			b := newBridge(&bridge.Config{Bridge: br})
+			file := slack.File{ID: "video", Name: "clip.mp4", Size: 5, URLPrivate: server.URL}
+			if !privateOnly {
+				file.URLPrivateDownload = server.URL
+				file.URLPrivate = "http://unused.invalid"
+			}
+			msg := &config.Message{Text: "watch this", Extra: make(map[string][]interface{})}
+			b.handleAttachments(&slackevents.MessageEvent{Channel: "channel", Message: &slack.Msg{Files: []slack.File{file}}}, msg)
+			require.Len(t, msg.Extra["file"], 1)
+			got := msg.Extra["file"][0].(config.FileInfo)
+			assert.Equal(t, "clip.mp4", got.Name)
+			assert.Equal(t, "video", got.NativeID)
+			assert.Equal(t, "video", string(*got.Data))
+			assert.Equal(t, "watch this", got.Comment)
+			assert.Equal(t, server.URL, got.URL)
+			assert.Empty(t, msg.Text)
+			assert.Equal(t, 1, requests)
+			assert.True(t, b.cache.Contains(cfileDownloadChannel+file.ID))
 		})
 	}
 }

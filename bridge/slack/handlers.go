@@ -372,9 +372,13 @@ func (b *Bslack) handleDownloadFile(rmsg *config.Message, file *slack.File, retr
 	}
 
 	// Actually download the file.
-	data, err := helper.DownloadFileAuth(file.URLPrivateDownload, "Bearer "+b.GetString(tokenConfig))
+	url := file.URLPrivateDownload
+	if url == "" {
+		url = file.URLPrivate
+	}
+	data, err := helper.DownloadFileAuth(url, "Bearer "+b.GetString(tokenConfig))
 	if err != nil {
-		return fmt.Errorf("download %s failed %#v", file.URLPrivateDownload, err)
+		return fmt.Errorf("download %s failed %#v", url, err)
 	}
 
 	if len(*data) != file.Size && !retry {
@@ -388,7 +392,7 @@ func (b *Bslack) handleDownloadFile(rmsg *config.Message, file *slack.File, retr
 	// that the comment is not duplicated.
 	comment := rmsg.Text
 	rmsg.Text = ""
-	helper.HandleDownloadData2(b.Log, rmsg, file.Name, file.ID, comment, file.URLPrivateDownload, data, b.General)
+	helper.HandleDownloadData2(b.Log, rmsg, file.Name, file.ID, comment, url, data, b.General)
 	return nil
 }
 

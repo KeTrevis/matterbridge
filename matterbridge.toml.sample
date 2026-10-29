@@ -1738,8 +1738,7 @@ MediaServerDownload="https://youserver.com/download"
 #matterbridge will download and upload this file to bridges that also support uploading files.
 #eg downloading from slack to upload it to mattermost
 #
-#It will only download from bridges that don't have public links available, which are for the moment
-#slack, telegram, matrix and mattermost
+#Downloads files from slack, telegram, matrix and mattermost, and video attachments from discord.
 #
 #OPTIONAL (default 1000000 (1 megabyte))
 MediaDownloadSize=1000000
