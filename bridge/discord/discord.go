@@ -289,11 +289,17 @@ func (b *Bdiscord) Send(msg config.Message) (string, error) {
 
 	// Use webhook to send the message
 	useWebhooks := b.shouldMessageUseWebhooks(&msg)
-	if useWebhooks && !inThread && msg.Event != config.EventMsgDelete && msg.ParentID == "" {
-		return b.handleEventWebhook(&msg, channelID)
+	var ids string
+	var err error
+	if useWebhooks && msg.Event != config.EventMsgDelete && msg.Event != config.EventFileDelete && msg.ParentID == "" {
+		threadID := ""
+		if inThread {
+			threadID = channelID
+		}
+		ids, err = b.handleEventWebhook(&msg, parentChannelID, threadID)
+	} else {
+		ids, err = b.handleEventBotUser(&msg, channelID)
 	}
-
-	ids, err := b.handleEventBotUser(&msg, channelID)
 	if inThread && err == nil {
 		for _, id := range strings.Split(ids, ";") {
 			if id != "" {

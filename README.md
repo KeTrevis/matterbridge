@@ -174,6 +174,8 @@ See <https://github.com/42wim/matterbridge/wiki>
 
 ## Installing / upgrading
 
+For this Slack/Discord deployment, see the [SSH deployment instructions](deploy/README.md).
+
 ### Binaries
 
 - Latest stable release [v1.26.0](https://github.com/42wim/matterbridge/releases/latest)

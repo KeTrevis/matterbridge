@@ -1693,6 +1693,9 @@ RemoteNickFormat="{NICK}"
 ###################################################################
 # Settings here are defaults that each protocol can override
 [general]
+# Optional SQLite file for message/thread associations across restarts.
+# The parent directory must exist and be writable. Empty keeps the in-memory cache only.
+MessageStorePath=""
 
 ## RELOADABLE SETTINGS
 ## Settings below can be reloaded by editing the file

@@ -14,8 +14,11 @@ services:
       MATTERBRIDGE_DISCORD_MAIN_TOKEN: ${DISCORD_BOT_TOKEN:?DISCORD_BOT_TOKEN missing}
     volumes:
       - ./matterbridge.toml:/etc/matterbridge/matterbridge.toml:ro
+      - bridge-data:/var/lib/matterbridge
     logging:
       driver: json-file
       options:
         max-size: 10m
         max-file: '3'
+volumes:
+  bridge-data:

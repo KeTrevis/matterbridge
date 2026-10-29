@@ -174,9 +174,8 @@ func (b *Bslack) skipMessageEvent(ev *slackevents.MessageEvent) bool {
 	// ev.Message.Attachments check below covers both cases uniformly.
 
 	if ev.Message != nil {
-		// It seems ev.Message.Edited == nil when slack unfurls.
-		// Do not forward these messages. See Github issue #266.
-		if ev.Message.ThreadTimestamp != ev.Message.Timestamp &&
+		// Only message_changed can be an unfurl; regular replies also have a synthesized Message.
+		if ev.SubType == sMessageChanged && ev.Message.ThreadTimestamp != ev.Message.Timestamp &&
 			ev.Message.Edited == nil {
 			return true
 		}

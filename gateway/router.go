@@ -20,7 +20,8 @@ type Router struct {
 	Message          chan config.Message
 	MattermostPlugin chan config.Message
 
-	logger *logrus.Entry
+	logger       *logrus.Entry
+	messageStore *messageStore
 }
 
 // NewRouter initializes a new Matterbridge router for the specified configuration and
@@ -51,6 +52,14 @@ func NewRouter(rootLogger *logrus.Logger, cfg config.Config, bridgeMap map[strin
 			return nil, fmt.Errorf("Gateway with name %s already exists", entry.Name)
 		}
 		r.Gateways[entry.Name] = New(rootLogger, entry, r)
+	}
+	if path := cfg.BridgeValues().General.MessageStorePath; path != "" {
+		var err error
+		r.messageStore, err = openMessageStore(path)
+		if err != nil {
+			return nil, fmt.Errorf("open message store: %w", err)
+		}
+		logger.Infof("Message mappings stored in SQLite: %s", path)
 	}
 	return r, nil
 }
@@ -155,15 +164,8 @@ func (r *Router) handleReceive() {
 			}
 
 			if msg.ID != "" {
-				_, exists := gw.Messages.Get(msg.Protocol + " " + msg.ID)
-
-				// Only add the message ID if it doesn't already exist
-				//
-				// For some bridges we always add/update the message ID.
-				// This is necessary as msgIDs will change if a bridge returns
-				// a different ID in response to edits.
-				if !exists {
-					gw.Messages.Add(msg.Protocol+" "+msg.ID, msgIDs)
+				if err := gw.rememberMessage(msg.Protocol+" "+msg.ID, msgIDs); err != nil {
+					r.logger.Fatalf("Persisting message mappings failed: %v", err)
 				}
 			}
 		}

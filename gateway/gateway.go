@@ -88,6 +88,13 @@ func (gw *Gateway) FindCanonicalMsgID(protocol string, mID string) string {
 			}
 		}
 	}
+	if gw.Router.messageStore != nil {
+		canonical, err := gw.Router.messageStore.canonical(gw.Name, ID)
+		if err != nil {
+			gw.logger.Fatalf("Reading message mappings failed: %v", err)
+		}
+		return canonical
+	}
 	return ""
 }
 
@@ -277,6 +284,13 @@ func (gw *Gateway) getDestMsgID(msgID string, dest *bridge.Bridge, channel *conf
 				return strings.Replace(id.ID, dest.Protocol+" ", "", 1)
 			}
 		}
+	}
+	if gw.Router.messageStore != nil && msgID != "" {
+		id, err := gw.Router.messageStore.destination(gw.Name, msgID, dest.Account, channel.ID)
+		if err != nil {
+			gw.logger.Fatalf("Reading message mappings failed: %v", err)
+		}
+		return id
 	}
 	return ""
 }

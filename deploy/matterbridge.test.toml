@@ -1,0 +1,31 @@
+[general]
+MediaDownloadSize = 10000000
+MessageStorePath = "message-links.sqlite3"
+
+[slack.main]
+Token = ""
+AppToken = ""
+PrefixMessagesWithNick = false
+RemoteNickFormat = "{NICK} [Discord]"
+PreserveThreading = true
+
+[discord.main]
+Token = ""
+Server = "1422237626366431270"
+RemoteNickFormat = "{NICK} [Slack]"
+AutoWebhooks = true
+AllowMention = []
+PreserveThreading = true
+UseNativeThreads = true
+
+[[gateway]]
+name = "test-local"
+enable = true
+
+[[gateway.inout]]
+account = "slack.main"
+channel = "ID:C0CCT9995FZ"
+
+[[gateway.inout]]
+account = "discord.main"
+channel = "ID:1565380845555023893"

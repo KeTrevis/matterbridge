@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/42wim/matterbridge/bridge"
@@ -52,6 +53,29 @@ func TestSkipMessageEventDoesNotDropRegularMessages(t *testing.T) {
 
 	assert.False(t, b.skipMessageEvent(&ev),
 		"a plain message from a real human user must not be skipped")
+}
+
+func TestSkipMessageEventThreadReplies(t *testing.T) {
+	logger := logrus.New()
+	logger.SetOutput(io.Discard)
+	b := newBridge(&bridge.Config{Bridge: &bridge.Bridge{Log: logrus.NewEntry(logger)}})
+	b.si = &slack.Bot{ID: "BBOTID", UserID: "UBOTUSER"}
+	for _, tc := range []struct {
+		name     string
+		body     string
+		wantSkip bool
+	}{
+		{"new reply", `{"type":"message","user":"human","text":"reply","ts":"2.0","thread_ts":"1.0"}`, false},
+		{"broadcast reply", `{"type":"message","subtype":"thread_broadcast","user":"human","text":"reply","ts":"2.0","thread_ts":"1.0"}`, false},
+		{"edited reply", `{"type":"message","subtype":"message_changed","message":{"user":"human","text":"edited","ts":"2.0","thread_ts":"1.0","edited":{"user":"human","ts":"3.0"}}}`, false},
+		{"unfurl update", `{"type":"message","subtype":"message_changed","message":{"user":"human","text":"reply","ts":"2.0","thread_ts":"1.0"}}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var ev slackevents.MessageEvent
+			require.NoError(t, json.Unmarshal([]byte(tc.body), &ev))
+			assert.Equal(t, tc.wantSkip, b.skipMessageEvent(&ev))
+		})
+	}
 }
 
 func TestPopulateThreadParent(t *testing.T) {
@@ -114,6 +138,80 @@ func TestDownloadVideo(t *testing.T) {
 			assert.Empty(t, msg.Text)
 			assert.Equal(t, 1, requests)
 			assert.True(t, b.cache.Contains(cfileDownloadChannel+file.ID))
+		})
+	}
+}
+
+func TestDownloadVideoAboveOneMegabyte(t *testing.T) {
+	data := strings.Repeat("v", 2534730)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+		_, _ = io.WriteString(w, data)
+	}))
+	defer server.Close()
+	logger := logrus.New()
+	logger.SetOutput(io.Discard)
+	br := bridge.New(&config.Bridge{Account: "slack.test"})
+	br.Config = config.NewConfigFromString(logger, []byte("[general]\nMediaDownloadSize=10000000\n[slack.test]\nToken=\"test-token\"\n"))
+	br.Log = logrus.NewEntry(logger)
+	br.General = &br.Config.BridgeValues().General
+	b := newBridge(&bridge.Config{Bridge: br})
+	msg := &config.Message{Text: "caption", Extra: make(map[string][]interface{})}
+	err := b.handleDownloadFile(msg, &slack.File{ID: "video", Name: "IMG_1701.MOV", Size: len(data), URLPrivate: server.URL}, false)
+	require.NoError(t, err)
+	require.Len(t, msg.Extra["file"], 1)
+	file := msg.Extra["file"][0].(config.FileInfo)
+	assert.Equal(t, data, string(*file.Data))
+	assert.Equal(t, "caption", file.Comment)
+}
+
+func TestUploadMediaToSlackPreservesBytesAndThread(t *testing.T) {
+	for _, filename := range []string{"photo.png", "clip.MOV"} {
+		t.Run(filename, func(t *testing.T) {
+			data := []byte("original media bytes")
+			var endpoint string
+			var calls []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls = append(calls, r.URL.Path)
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/files.getUploadURLExternal":
+					assert.Equal(t, filename, r.FormValue("filename"))
+					assert.Equal(t, "20", r.FormValue("length"))
+					_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "file_id": "file", "upload_url": endpoint + "/upload"})
+				case "/upload":
+					file, header, err := r.FormFile("file")
+					require.NoError(t, err)
+					defer file.Close()
+					assert.Equal(t, filename, header.Filename)
+					uploaded, err := io.ReadAll(file)
+					require.NoError(t, err)
+					assert.Equal(t, data, uploaded)
+					_, _ = io.WriteString(w, `{}`)
+				case "/files.completeUploadExternal":
+					assert.Equal(t, "channel", r.FormValue("channel_id"))
+					assert.Equal(t, "1.0", r.FormValue("thread_ts"))
+					assert.Contains(t, r.FormValue("initial_comment"), "caption")
+					_, _ = io.WriteString(w, `{"ok":true,"files":[{"id":"file"}]}`)
+				case "/files.info":
+					_, _ = io.WriteString(w, `{"ok":true,"file":{"id":"file","shares":{"private":{"channel":[{"ts":"2.0"}]}}}}`)
+				default:
+					t.Errorf("unexpected Slack request: %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+			endpoint = server.URL
+			logger := logrus.New()
+			logger.SetOutput(io.Discard)
+			b := newBridge(&bridge.Config{Bridge: &bridge.Bridge{Log: logrus.NewEntry(logger)}})
+			b.sc = slack.New("test-token", slack.OptionAPIURL(server.URL+"/"))
+			id, err := b.uploadFile(&config.Message{Username: "Alice", ParentID: "1.0", Extra: map[string][]interface{}{
+				"file": {config.FileInfo{Name: filename, Data: &data, Comment: "caption"}},
+			}}, "channel")
+			require.NoError(t, err)
+			assert.Equal(t, "2.0", id)
+			assert.Equal(t, []string{"/files.getUploadURLExternal", "/upload", "/files.completeUploadExternal", "/files.info"}, calls)
 		})
 	}
 }

@@ -178,20 +178,22 @@ func (b *Bdiscord) messageCreate(s *discordgo.Session, m *discordgo.MessageCreat
 
 func (b *Bdiscord) handleAttachments(attachments []*discordgo.MessageAttachment, rmsg *config.Message) {
 	for _, attach := range attachments {
-		if strings.HasPrefix(attach.ContentType, "video/") || strings.HasPrefix(mime.TypeByExtension(strings.ToLower(filepath.Ext(attach.Filename))), "video/") {
+		inferredType := mime.TypeByExtension(strings.ToLower(filepath.Ext(attach.Filename)))
+		if strings.HasPrefix(attach.ContentType, "video/") || strings.HasPrefix(attach.ContentType, "image/") ||
+			strings.HasPrefix(inferredType, "video/") || strings.HasPrefix(inferredType, "image/") {
 			if rmsg.Extra == nil {
 				rmsg.Extra = make(map[string][]interface{})
 			}
 			if err := helper.HandleDownloadSize(b.Log, rmsg, attach.Filename, int64(attach.Size), b.General); err != nil {
-				b.Log.WithError(err).Info("Skipping download of incoming video")
+				b.Log.WithError(err).Info("Skipping download of incoming media")
 				continue
 			}
-			data, err := b.downloadVideo(attach.URL)
+			data, err := b.downloadMedia(attach.URL)
 			if err == nil {
 				helper.HandleDownloadData2(b.Log, rmsg, attach.Filename, attach.ID, "", attach.URL, &data, b.General)
 				continue
 			}
-			b.Log.WithError(err).Error("Could not download incoming video")
+			b.Log.WithError(err).Error("Could not download incoming media")
 		}
 		rmsg.Text += "\n" + attach.URL
 	}
@@ -203,7 +205,7 @@ func (b *Bdiscord) handleAttachments(attachments []*discordgo.MessageAttachment,
 	}
 }
 
-func (b *Bdiscord) downloadVideo(url string) ([]byte, error) {
+func (b *Bdiscord) downloadMedia(url string) ([]byte, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
@@ -211,14 +213,14 @@ func (b *Bdiscord) downloadVideo(url string) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("video download returned HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("media download returned HTTP %d", resp.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, int64(b.General.MediaDownloadSize)+1))
 	if err != nil {
 		return nil, err
 	}
 	if len(data) > b.General.MediaDownloadSize {
-		return nil, fmt.Errorf("video exceeds MediaDownloadSize (%d)", b.General.MediaDownloadSize)
+		return nil, fmt.Errorf("media exceeds MediaDownloadSize (%d)", b.General.MediaDownloadSize)
 	}
 	return data, nil
 }

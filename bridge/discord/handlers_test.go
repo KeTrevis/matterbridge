@@ -63,7 +63,7 @@ func TestHandleEmbed(t *testing.T) {
 	}
 }
 
-func TestForwardVideoAttachments(t *testing.T) {
+func TestForwardMediaAttachments(t *testing.T) {
 	for _, tc := range []struct {
 		name, filename, contentType, caption, body string
 		status, declaredSize, limit                int
@@ -72,11 +72,15 @@ func TestForwardVideoAttachments(t *testing.T) {
 	}{
 		{name: "video only", filename: "clip.mp4", contentType: "video/mp4", body: "video", status: 200, declaredSize: 5, limit: 20, wantFile: true},
 		{name: "caption and missing MIME type", filename: "clip.WEBM", caption: "watch this", body: "video", status: 200, declaredSize: 5, limit: 20, wantFile: true},
+		{name: "image MIME type", filename: "upload.bin", contentType: "image/png", body: "video", status: 200, declaredSize: 5, limit: 20, wantFile: true},
+		{name: "image extension without MIME", filename: "photo.PNG", caption: "look", body: "video", status: 200, declaredSize: 5, limit: 20, wantFile: true},
+		{name: "image with generic MIME", filename: "photo.jpg", contentType: "application/octet-stream", body: "video", status: 200, declaredSize: 5, limit: 20, wantFile: true},
+		{name: "image download failure keeps link", filename: "photo.png", status: 503, limit: 20, wantURL: true},
 		{name: "download failure keeps link", filename: "clip.mp4", status: 503, limit: 20, wantURL: true},
 		{name: "actual size exceeds limit", filename: "clip.mp4", body: "too much data", status: 200, declaredSize: 1, limit: 5, wantURL: true},
 		{name: "declared size exceeds limit", filename: "clip.mp4", declaredSize: 21, limit: 20},
 		{name: "blacklisted", filename: "clip.mp4", blacklist: []string{`\.mp4$`}, limit: 20},
-		{name: "other files stay links", filename: "photo.png", limit: 20, wantURL: true},
+		{name: "other files stay links", filename: "document.pdf", limit: 20, wantURL: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			requests := 0
@@ -150,7 +154,7 @@ func TestVideoUploadPreservesBytesAndCaption(t *testing.T) {
 	assert.Equal(t, "upload", id)
 }
 
-func TestMixedVideoAttachmentsPreserveLinksAndCaption(t *testing.T) {
+func TestMixedMediaAttachmentsPreserveLinksAndCaption(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "video")
 	}))
@@ -161,10 +165,12 @@ func TestMixedVideoAttachmentsPreserveLinksAndCaption(t *testing.T) {
 	b.handleAttachments([]*discordgo.MessageAttachment{
 		{ID: "first", Filename: "first.mp4", URL: server.URL, Size: 5},
 		{ID: "second", Filename: "second.mov", URL: server.URL, Size: 5},
-		{Filename: "photo.png", URL: "https://example.com/photo.png"},
+		{ID: "third", Filename: "photo.png", URL: server.URL, Size: 5},
+		{Filename: "document.pdf", URL: "https://example.com/document.pdf"},
 	}, msg)
-	require.Len(t, msg.Extra["file"], 2)
-	assert.Equal(t, "watch this\nhttps://example.com/photo.png", msg.Extra["file"][0].(config.FileInfo).Comment)
+	require.Len(t, msg.Extra["file"], 3)
+	assert.Equal(t, "watch this\nhttps://example.com/document.pdf", msg.Extra["file"][0].(config.FileInfo).Comment)
 	assert.Empty(t, msg.Extra["file"][1].(config.FileInfo).Comment)
+	assert.Empty(t, msg.Extra["file"][2].(config.FileInfo).Comment)
 	assert.Empty(t, msg.Text)
 }

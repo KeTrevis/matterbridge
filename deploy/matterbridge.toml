@@ -1,15 +1,19 @@
+[general]
+MediaDownloadSize = 10000000
+MessageStorePath = "/var/lib/matterbridge/message-links.sqlite3"
+
 [slack.main]
 Token = ""
 AppToken = ""
-PrefixMessagesWithNick = true
-RemoteNickFormat = "[Discord] {NICK}: "
+PrefixMessagesWithNick = false
+RemoteNickFormat = "{NICK} [Discord]"
 PreserveThreading = true
 
 [discord.main]
 Token = ""
 Server = "1422237626366431270"
-RemoteNickFormat = "[Slack] {NICK}: "
-AutoWebhooks = false
+RemoteNickFormat = "{NICK} [Slack]"
+AutoWebhooks = true
 AllowMention = []
 PreserveThreading = true
 UseNativeThreads = true

@@ -34,6 +34,7 @@ func (b *Bdiscord) nativeThreadChannel(msg *config.Message, channelID string) (s
 	rootID := strings.Split(msg.ParentID, ";")[0]
 	// Slack includes thread_ts on edits of the root message too.
 	if messageID == rootID {
+		msg.ParentID = ""
 		return channelID, nil
 	}
 	thread, err := b.discordThread(channelID, rootID)

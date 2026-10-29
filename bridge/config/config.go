@@ -122,6 +122,7 @@ type Protocol struct {
 	MessageQueue           int        // IRC, size of message queue for flood control
 	MessageSplit           bool       // IRC, split long messages with newlines on MessageLength instead of clipping
 	MessageSplitMaxCount   int        // discord, split long messages into at most this many messages instead of clipping (MessageLength=1950 cannot be configured)
+	MessageStorePath       string     // general: SQLite message ID mappings
 	Muc                    string     // xmpp
 	MxID                   string     // matrix
 	Name                   string     // all protocols

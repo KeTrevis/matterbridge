@@ -1,0 +1,25 @@
+name: slack-discord-bridge-test
+services:
+  bridge:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: slack-discord-bridge:test
+    working_dir: /var/lib/matterbridge
+    restart: "no"
+    init: true
+    stop_grace_period: 15s
+    environment:
+      MATTERBRIDGE_SLACK_MAIN_TOKEN: ${TEST_SLACK_BOT_TOKEN:?Slack test app bot token missing}
+      MATTERBRIDGE_SLACK_MAIN_APPTOKEN: ${TEST_SLACK_APP_TOKEN:?Slack test app-level token missing}
+      MATTERBRIDGE_DISCORD_MAIN_TOKEN: ${TEST_DISCORD_BOT_TOKEN:?Discord test token missing}
+    volumes:
+      - ./matterbridge.test.toml:/etc/matterbridge/matterbridge.toml:ro
+      - bridge-data:/var/lib/matterbridge
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+volumes:
+  bridge-data:
