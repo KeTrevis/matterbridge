@@ -1,2 +1,11 @@
 Dockerfile
 tgs.Dockerfile
+.git
+.github
+**/.env
+**/.env.*
+deploy
+data
+release_1.27
+*.log
+.DS_Store

@@ -1,0 +1,26 @@
+[slack.main]
+Token = ""
+AppToken = ""
+PrefixMessagesWithNick = true
+RemoteNickFormat = "[Discord] {NICK}: "
+PreserveThreading = true
+
+[discord.main]
+Token = ""
+Server = "1422237626366431270"
+RemoteNickFormat = "[Slack] {NICK}: "
+AutoWebhooks = false
+AllowMention = []
+PreserveThreading = true
+
+[[gateway]]
+name = "le-fond"
+enable = true
+
+[[gateway.inout]]
+account = "slack.main"
+channel = "ID:C081W9R788J"
+
+[[gateway.inout]]
+account = "discord.main"
+channel = "ID:1565346725776859157"

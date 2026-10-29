@@ -7,3 +7,11 @@ matterbridge.toml
 
 # Exclude IDE Files
 .vscode
+
+.env
+.env.*
+!.env.example
+!deploy/matterbridge.toml
+/data/
+*.log
+.DS_Store
