@@ -66,8 +66,8 @@ func (b *Bslack) populateMessageWithUserInfo(ev *slackevents.MessageEvent, rmsg 
 
 	// First, deal with bot-originating messages but only do so when not using webhooks: we
 	// would not be able to distinguish which bot would be sending them.
-	if err := b.populateMessageWithBotInfo(ev, rmsg); err != nil {
-		return err
+	if b.GetString(outgoingWebhookConfig) == "" && (ev.BotID != "" || (ev.Message != nil && ev.Message.BotID != "")) {
+		return b.populateMessageWithBotInfo(ev, rmsg)
 	}
 
 	// Second, deal with "real" users if we have the necessary information.
@@ -101,14 +101,18 @@ func (b *Bslack) populateMessageWithUserInfo(ev *slackevents.MessageEvent, rmsg 
 }
 
 func (b *Bslack) populateMessageWithBotInfo(ev *slackevents.MessageEvent, rmsg *config.Message) error {
-	if ev.BotID == "" || b.GetString(outgoingWebhookConfig) != "" {
+	botID := ev.BotID
+	if botID == "" && ev.Message != nil {
+		botID = ev.Message.BotID
+	}
+	if botID == "" || b.GetString(outgoingWebhookConfig) != "" {
 		return nil
 	}
 
 	var err error
 	var bot *slack.Bot
 	for {
-		bot, err = b.smc.GetBotInfo(slack.GetBotInfoParameters{Bot: ev.BotID})
+		bot, err = b.smc.GetBotInfo(slack.GetBotInfoParameters{Bot: botID})
 		if err == nil {
 			break
 		}
@@ -120,12 +124,20 @@ func (b *Bslack) populateMessageWithBotInfo(ev *slackevents.MessageEvent, rmsg *
 	}
 	b.Log.Debugf("Found bot %#v", bot)
 
-	if bot.Name != "" {
-		rmsg.Username = bot.Name
-		if ev.Username != "" {
-			rmsg.Username = ev.Username
+	rmsg.Username, rmsg.UserID, rmsg.Avatar = bot.Name, bot.ID, bot.Icons.Image48
+	if ev.Message != nil {
+		if ev.Message.Username != "" {
+			rmsg.Username = ev.Message.Username
 		}
-		rmsg.UserID = bot.ID
+		if ev.Message.Icons != nil && ev.Message.Icons.IconURL != "" {
+			rmsg.Avatar = ev.Message.Icons.IconURL
+		}
+	}
+	if ev.Username != "" {
+		rmsg.Username = ev.Username
+	}
+	if ev.Icons != nil && ev.Icons.IconURL != "" {
+		rmsg.Avatar = ev.Icons.IconURL
 	}
 	return nil
 }

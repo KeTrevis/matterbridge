@@ -41,7 +41,9 @@ func (b *Bslack) handleSlack() {
 			message.Text = html.UnescapeString(message.Text)
 
 			// Add the avatar
-			message.Avatar = b.users.getAvatar(message.UserID)
+			if message.Avatar == "" {
+				message.Avatar = b.users.getAvatar(message.UserID)
+			}
 		}
 
 		b.Log.Debugf("<= Message is %#v", message)
