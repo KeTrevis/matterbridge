@@ -2,6 +2,7 @@ package bslack
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -213,4 +214,94 @@ func TestUploadMediaToSlackPreservesBytesAndThread(t *testing.T) {
 			assert.Equal(t, []string{"/files.getUploadURLExternal", "/upload", "/files.completeUploadExternal", "/files.info"}, calls)
 		})
 	}
+}
+
+func TestUploadFileWaitsForMessageID(t *testing.T) {
+	for _, tc := range []struct {
+		name, visibility, apiError string
+		files, missingShares       int
+		rateLimited                bool
+		wantError                  string
+	}{
+		{name: "delayed public share", visibility: "public", files: 1, missingShares: 2},
+		{name: "delayed private share", visibility: "private", files: 1, missingShares: 1},
+		{name: "multiple files keep first message as root", visibility: "public", files: 4},
+		{name: "rate limit is retried", visibility: "public", files: 1, rateLimited: true},
+		{name: "missing share is an error", files: 1, missingShares: 5, wantError: "no message timestamp"},
+		{name: "API error is reported", files: 1, apiError: "missing_scope", wantError: "missing_scope"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var endpoint string
+			uploads, completed, infoCalls := 0, 0, 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/files.getUploadURLExternal":
+					uploads++
+					_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "file_id": fmt.Sprintf("file%d", uploads), "upload_url": endpoint + "/upload"})
+				case "/upload":
+					_, _ = io.WriteString(w, `{}`)
+				case "/files.completeUploadExternal":
+					completed++
+					_, _ = fmt.Fprintf(w, `{"ok":true,"files":[{"id":"file%d"}]}`, completed)
+				case "/files.info":
+					infoCalls++
+					assert.Equal(t, tc.files, completed, "all files must be sent before resolving the root")
+					assert.Equal(t, "file1", r.FormValue("file"))
+					switch {
+					case tc.rateLimited && infoCalls == 1:
+						w.Header().Set("Retry-After", "0")
+						w.WriteHeader(http.StatusTooManyRequests)
+					case tc.apiError != "":
+						_, _ = fmt.Fprintf(w, `{"ok":false,"error":%q}`, tc.apiError)
+					case infoCalls <= tc.missingShares:
+						_, _ = io.WriteString(w, `{"ok":true,"file":{"id":"file1","shares":{}}}`)
+					default:
+						_, _ = fmt.Fprintf(w, `{"ok":true,"file":{"id":"file1","shares":{%q:{"channel":[{"ts":"2.0"}]}}}}`, tc.visibility)
+					}
+				default:
+					t.Errorf("unexpected Slack request: %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+			endpoint = server.URL
+			b := identityTestBridge(endpoint, false)
+			data := []byte("image bytes")
+			files := make([]interface{}, tc.files)
+			for i := range files {
+				files[i] = config.FileInfo{Name: "image.png", Data: &data}
+			}
+			id, err := b.uploadFile(&config.Message{Account: "discord.test", Extra: map[string][]interface{}{"file": files}}, "channel")
+			if tc.wantError != "" {
+				require.ErrorContains(t, err, tc.wantError)
+				assert.Empty(t, id)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, "2.0", id)
+			}
+			assert.Equal(t, tc.files, uploads, "metadata retries must not upload files again")
+			assert.Equal(t, tc.files, completed)
+			if tc.apiError != "" {
+				assert.Equal(t, 1, infoCalls)
+			} else if tc.rateLimited {
+				assert.Equal(t, 2, infoCalls)
+			} else {
+				assert.Equal(t, min(tc.missingShares+1, 5), infoCalls)
+			}
+		})
+	}
+}
+
+func TestMissingDiscordThreadParentDoesNotPostToSlackChannel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("a thread reply with no parent must not call Slack: %s", r.URL.Path)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	b := identityTestBridge(server.URL, false)
+	b.Config.Bridge.Config = &config.TestConfig{Config: b.Config.Bridge.Config, Overrides: map[string]interface{}{"slack.test.PreserveThreading": true}}
+	id, err := b.Send(config.Message{Channel: "ID:channel", Account: "discord.test", Protocol: "discord", ParentID: config.ParentIDNotFound, Text: "thread reply"})
+	require.ErrorContains(t, err, "parent message mapping is missing")
+	assert.Empty(t, id)
 }

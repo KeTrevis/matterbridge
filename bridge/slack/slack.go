@@ -319,6 +319,9 @@ func (b *Bslack) sendSocket(msg config.Message) (string, error) {
 
 	// Handle prefix hint for unthreaded messages.
 	if msg.ParentNotFound() {
+		if msg.Protocol == "discord" && b.GetBool("PreserveThreading") {
+			return "", fmt.Errorf("cannot route Slack thread: parent message mapping is missing")
+		}
 		msg.ParentID = ""
 		msg.Text = fmt.Sprintf("[thread]: %s", msg.Text)
 	}
@@ -467,7 +470,7 @@ func (b *Bslack) postMessage(msg *config.Message, channelInfo *slack.Channel) (s
 
 // uploadFile handles native upload of files
 func (b *Bslack) uploadFile(msg *config.Message, channelID string) (string, error) {
-	var messageID string
+	var firstFileID string
 	messageText := msg.Text
 	for _, f := range msg.Extra["file"] {
 		fi, ok := f.(config.FileInfo)
@@ -512,31 +515,45 @@ func (b *Bslack) uploadFile(msg *config.Message, channelID string) (string, erro
 			b.Log.Errorf("uploadfile %#v", err)
 			return "", err
 		}
+		if res.ID == "" {
+			return "", fmt.Errorf("Slack upload returned no file ID in channel %s", channelID)
+		}
 		messageText = ""
-		if res.ID != "" {
-			b.Log.Debugf("Adding file ID %s to cache with timestamp %s", res.ID, ts.String())
-			b.cache.Add("file"+res.ID, ts)
-
-			// UploadFile's FileSummary no longer carries share info since the
-			// files.upload -> files.upload.v2 migration, so fetch the full File
-			// to search for message id by uploaded file in private/public
-			// channels, and get the thread timestamp from the uploaded file.
-			fullFile, _, _, ferr := b.sc.GetFileInfo(res.ID, 0, 0)
-			if ferr != nil {
-				b.Log.Errorf("getfileinfo %#v", ferr)
-				continue
-			}
-
-			if v, ok := fullFile.Shares.Private[channelID]; ok && len(v) > 0 {
-				messageID = v[0].Ts
-			}
-
-			if v, ok := fullFile.Shares.Public[channelID]; ok && len(v) > 0 {
-				messageID = v[0].Ts
-			}
+		b.Log.Debugf("Adding file ID %s to cache with timestamp %s", res.ID, ts.String())
+		b.cache.Add("file"+res.ID, ts)
+		if firstFileID == "" {
+			firstFileID = res.ID
 		}
 	}
-	return messageID, nil
+	if firstFileID == "" {
+		return "", nil
+	}
+	return b.uploadedFileMessageID(firstFileID, channelID)
+}
+
+func (b *Bslack) uploadedFileMessageID(fileID, channelID string) (string, error) {
+	// Slack can finish the upload before files.info includes the channel's message timestamp.
+	for attempt := 0; attempt < 5; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Second)
+		}
+		file, _, _, err := b.sc.GetFileInfo(fileID, 0, 0)
+		if err != nil {
+			if _, limited := err.(*slack.RateLimitedError); limited {
+				_ = handleRateLimit(b.Log, err)
+				continue
+			}
+			return "", fmt.Errorf("get uploaded Slack file %s: %w", fileID, err)
+		}
+
+		if shares := file.Shares.Private[channelID]; len(shares) > 0 && shares[0].Ts != "" {
+			return shares[0].Ts, nil
+		}
+		if shares := file.Shares.Public[channelID]; len(shares) > 0 && shares[0].Ts != "" {
+			return shares[0].Ts, nil
+		}
+	}
+	return "", fmt.Errorf("uploaded Slack file %s has no message timestamp in channel %s after 5 attempts", fileID, channelID)
 }
 
 func (b *Bslack) prepareMessageOptions(msg *config.Message) []slack.MsgOption {
