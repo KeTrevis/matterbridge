@@ -211,6 +211,10 @@ func (b *Bslack) Send(msg config.Message) (string, error) {
 		b.Log.Debugf("=> Receiving %#v", msg)
 	}
 
+	if msg.Event == config.EventReaction {
+		return "", b.sendReaction(msg)
+	}
+
 	msg.Text = helper.ClipMessage(msg.Text, messageLength, b.GetString("MessageClipped"))
 	msg.Text = b.replaceCodeFence(msg.Text)
 

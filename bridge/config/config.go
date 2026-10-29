@@ -23,6 +23,7 @@ const (
 	EventRejoinChannels    = "rejoin_channels"
 	EventUserAction        = "user_action"
 	EventMsgDelete         = "msg_delete"
+	EventReaction          = "reaction"
 	EventFileDelete        = "file_delete"
 	EventAPIConnected      = "api_connected"
 	EventUserTyping        = "user_typing"
@@ -32,7 +33,13 @@ const (
 
 const ParentIDNotFound = "msg-parent-not-found"
 
+type Reaction struct {
+	Emoji  string `json:"emoji"`
+	Remove bool   `json:"remove"`
+}
+
 type Message struct {
+	Reaction  *Reaction `json:"reaction,omitempty"`
 	Text      string    `json:"text"`
 	Channel   string    `json:"channel"`
 	Username  string    `json:"username"`

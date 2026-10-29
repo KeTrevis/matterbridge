@@ -28,6 +28,10 @@ func (b *Bslack) handleSlack() {
 	time.Sleep(time.Second)
 	b.Log.Debug("Start listening for Slack messages")
 	for message := range messages {
+		if message.Event == config.EventReaction {
+			b.Remote <- *message
+			continue
+		}
 		// don't do any action on deleted/typing messages
 		if message.Event != config.EventUserTyping && message.Event != config.EventMsgDelete &&
 			message.Event != config.EventFileDelete {
@@ -105,6 +109,10 @@ func (b *Bslack) handleSlackClient(messages chan *config.Message) {
 					continue
 				}
 				messages <- rmsg
+			case *slackevents.ReactionAddedEvent:
+				b.receiveReaction(innerEventData.User, innerEventData.Reaction, innerEventData.Item, messages)
+			case *slackevents.ReactionRemovedEvent:
+				b.receiveReaction(innerEventData.User, innerEventData.Reaction, innerEventData.Item, messages)
 			case *slackevents.MemberJoinedChannelEvent:
 				if innerEventData.User == b.si.UserID {
 					channel, err := b.smc.GetConversationInfo(&slack.GetConversationInfoInput{ChannelID: innerEventData.Channel})

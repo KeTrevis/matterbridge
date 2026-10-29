@@ -86,3 +86,30 @@ Le manifeste fourni contient déjà ce scope.
 
 Les fichiers envoyés vers Slack utilisent toujours l’identité de l’application,
 avec le nom de l’auteur dans le commentaire du fichier.
+
+## Réactions Slack ↔ Discord
+
+Les ajouts et retraits de réactions standard sont relayés dans les deux sens,
+y compris dans les threads. Chaque emoji apparaît sous l'identité du bot sur
+l'autre plateforme : il reste présent tant qu'au moins une personne l'utilise
+à la source. Les compteurs et les noms des personnes ne sont pas reproduits.
+Les réactions du bot sont ignorées pour éviter les boucles.
+
+Dans l'application Slack, ajouter le scope **reactions:write** (en plus de
+**reactions:read**) et les événements **reaction_added** et **reaction_removed**,
+puis réinstaller l'application dans le workspace. Les deux manifestes fournis
+incluent ces paramètres. Le bot Discord doit avoir **Ajouter des réactions** et
+**Voir les anciens messages** dans les salons reliés.
+
+Seuls les messages dont le bridge possède encore la correspondance peuvent
+recevoir une réaction synchronisée ; SQLite conserve ces correspondances après
+redémarrage. Les réactions déjà présentes avant le lancement ne sont pas reprises
+automatiquement. Les emojis personnalisés, les Super Réactions Discord et les
+suppressions groupées par modération ne sont pas synchronisés. Slack doit utiliser
+la connexion Socket Mode avec token bot.
+
+Pour vérifier les réactions, envoyer un message dans chaque sens, puis réagir
+sur le message original et sur sa copie. Refaire le test sur une réponse de
+thread, puis après un redémarrage du bridge. Avec deux personnes utilisant le
+même emoji, retirer une seule réaction doit conserver celle du bot distant ;
+retirer la dernière doit l'enlever. Vérifier qu'aucun nouveau message n'apparaît.

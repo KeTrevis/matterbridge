@@ -300,7 +300,7 @@ func (gw *Gateway) ignoreTextEmpty(msg *config.Message) bool {
 	if msg.Text != "" {
 		return false
 	}
-	if msg.Event == config.EventUserTyping {
+	if msg.Event == config.EventUserTyping || msg.Event == config.EventReaction {
 		return false
 	}
 	// we have an attachment or actual bytes, do not ignore
@@ -493,6 +493,24 @@ func (gw *Gateway) SendMessage(
 	debugSendMessage := ""
 	if msg.Event != config.EventUserTyping {
 		debugSendMessage = fmt.Sprintf("=> Sending %#v from %s (%s) to %s (%s)", msg, msg.Account, rmsg.Channel, dest.Account, channel.Name)
+	}
+
+	if msg.Event == config.EventReaction {
+		canonical := gw.FindCanonicalMsgID(rmsg.Protocol, rmsg.ID)
+		msg.ID = gw.getDestMsgID(canonical, dest, channel)
+		if msg.ID == "" && strings.HasPrefix(canonical, dest.Protocol+" ") {
+			msg.ID = strings.TrimPrefix(canonical, dest.Protocol+" ")
+		}
+		if msg.ID == "" {
+			return "", nil
+		}
+		msg.Channel = channel.Name
+		msg.ParentID = gw.getDestMsgID(canonicalParentMsgID, dest, channel)
+		if msg.ParentID == "" && strings.HasPrefix(canonicalParentMsgID, dest.Protocol+" ") {
+			msg.ParentID = strings.TrimPrefix(canonicalParentMsgID, dest.Protocol+" ")
+		}
+		_, err := dest.Send(msg)
+		return "", err
 	}
 
 	msg.Channel = channel.Name

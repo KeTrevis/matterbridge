@@ -21,6 +21,7 @@
         "chat:write.customize",
         "files:read",
         "files:write",
+        "reactions:write",
         "reactions:read"
       ]
     }
@@ -30,7 +31,9 @@
       "bot_events": [
         "message.channels",
         "message.groups",
-        "member_joined_channel"
+        "member_joined_channel",
+        "reaction_added",
+        "reaction_removed"
       ]
     },
     "socket_mode_enabled": true,

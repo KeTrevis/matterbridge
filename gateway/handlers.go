@@ -167,6 +167,8 @@ func (gw *Gateway) handleFilesLocal(fi *config.FileInfo) error {
 // ignoreEvent returns true if we need to ignore this event for the specified destination bridge.
 func (gw *Gateway) ignoreEvent(event string, dest *bridge.Bridge) bool {
 	switch event {
+	case config.EventReaction:
+		return dest.Protocol != "slack" && dest.Protocol != "discord"
 	case config.EventAvatarDownload:
 		// Avatar downloads are only relevant for telegram and mattermost for now
 		if dest.Protocol != "mattermost" && dest.Protocol != "telegram" && dest.Protocol != "xmpp" {

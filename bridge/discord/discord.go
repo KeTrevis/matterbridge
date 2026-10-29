@@ -28,6 +28,7 @@ type Bdiscord struct {
 	userID  string
 	guildID string
 
+	reactionsMutex sync.Mutex
 	channelsMutex  sync.RWMutex
 	channels       []*discordgo.Channel
 	channelInfoMap map[string]*config.ChannelInfo
@@ -229,6 +230,8 @@ func (b *Bdiscord) Connect() error {
 	b.c.AddHandler(b.messageTyping)
 	b.c.AddHandler(b.messageUpdate)
 	b.c.AddHandler(b.messageDelete)
+	b.c.AddHandler(b.reactionAdd)
+	b.c.AddHandler(b.reactionRemove)
 	b.c.AddHandler(b.messageDeleteBulk)
 	b.c.AddHandler(b.memberAdd)
 	b.c.AddHandler(b.memberRemove)
@@ -266,6 +269,9 @@ func (b *Bdiscord) Send(msg config.Message) (string, error) {
 		if err != nil {
 			return "", err
 		}
+	}
+	if msg.Event == config.EventReaction {
+		return "", b.sendReaction(msg, channelID)
 	}
 	inThread := channelID != parentChannelID
 

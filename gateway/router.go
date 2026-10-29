@@ -163,7 +163,7 @@ func (r *Router) handleReceive() {
 				msgIDs = append(msgIDs, gw.handleMessage(&msg, br)...)
 			}
 
-			if msg.ID != "" {
+			if msg.ID != "" && msg.Event != config.EventReaction {
 				if err := gw.rememberMessage(msg.Protocol+" "+msg.ID, msgIDs); err != nil {
 					r.logger.Fatalf("Persisting message mappings failed: %v", err)
 				}
